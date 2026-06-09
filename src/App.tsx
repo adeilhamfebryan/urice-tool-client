@@ -49,13 +49,13 @@ const tools = [
   {
     title: "Batch Automation",
     description: "Queue folder jobs and keep OCR work running in the background.",
-    status: "Planned",
+    status: "Operational",
     icon: Activity,
   },
   {
     title: "Auto Update",
-    description: "Ship new versions through signed releases without user command-line work.",
-    status: "Planned",
+    description: "Check and install signed GitHub release updates directly from Settings without command-line work.",
+    status: "Enabled",
     icon: RefreshCw,
   },
 ];
@@ -70,7 +70,8 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewName>("po");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [appVersion, setAppVersion] = useState<string>("0.1.1");
+  const [appVersion, setAppVersion] = useState<string>("0.1.0");
+  const [updateStatus, setUpdateStatus] = useState<string>("Auto checker will run when the app starts.");
   const [settings, setSettings] = useState<AppSettings>({
     excelPath: "",
     processedOutputFolder: "",
@@ -91,23 +92,32 @@ export function App() {
 
   async function checkForUpdates(manual = false) {
     try {
+      setUpdateStatus(manual ? "Checking for updates..." : "Auto checking for updates...");
       const update = await check();
       if (!update) {
+        setUpdateStatus("URice Tools Client is already up to date.");
         if (manual) {
           await message("URice Tools Client sudah versi terbaru.", { title: "No Update Available", kind: "info" });
         }
         return;
       }
 
+      setUpdateStatus(`Update ${update.version} is available.`);
       const approved = await confirm(
         `URice Tools Client versi ${update.version} tersedia.\n\nInstall update sekarang?`,
         { title: "Update Available", kind: "info" },
       );
-      if (!approved) return;
+      if (!approved) {
+        setUpdateStatus(`Update ${update.version} is available but was postponed.`);
+        return;
+      }
 
+      setUpdateStatus(`Downloading and installing update ${update.version}...`);
       await update.downloadAndInstall();
+      setUpdateStatus("Update installed. Restarting URice Tools Client...");
       await relaunch();
     } catch (error) {
+      setUpdateStatus(`Update check failed: ${String(error)}`);
       if (manual) {
         await message(`Gagal memeriksa update: ${String(error)}`, { title: "Update Check Failed", kind: "error" });
       }
@@ -246,6 +256,10 @@ export function App() {
               <label>
                 Application Version
                 <input value={`URice Tools Client v${appVersion}`} readOnly />
+              </label>
+              <label>
+                Auto Update Status
+                <input value={updateStatus} readOnly />
               </label>
               <label>
                 Excel Target
