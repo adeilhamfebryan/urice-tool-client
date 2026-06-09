@@ -6,7 +6,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LegacyRoot = Split-Path -Parent $ProjectRoot
 $VsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 $KeyPath = Join-Path $ProjectRoot "src-tauri\keys\urice-tools-client.key"
-$TesseractSource = Join-Path $LegacyRoot "tesseract_portable"
+$TesseractSource = if ($env:TESSERACT_PORTABLE_DIR) { $env:TESSERACT_PORTABLE_DIR } else { Join-Path $LegacyRoot "tesseract_portable" }
 $TesseractExe = Join-Path $TesseractSource "tesseract.exe"
 $IndData = Join-Path $TesseractSource "tessdata\ind.traineddata"
 $EngData = Join-Path $TesseractSource "tessdata\eng.traineddata"
@@ -14,7 +14,7 @@ $EngData = Join-Path $TesseractSource "tessdata\eng.traineddata"
 if (-not (Test-Path -LiteralPath $VsDevCmd)) {
   throw "Visual Studio Build Tools not found at $VsDevCmd"
 }
-if (-not (Test-Path -LiteralPath $KeyPath)) {
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and -not (Test-Path -LiteralPath $KeyPath)) {
   throw "Updater signing key not found at $KeyPath"
 }
 if (-not (Test-Path -LiteralPath $TesseractExe)) {
@@ -35,8 +35,12 @@ python -m PyInstaller --onefile --clean `
   --add-data "$TesseractSource;tesseract_portable" `
   (Join-Path $ProjectRoot "backend\engine.py")
 
-$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw -Path $KeyPath
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "urice-local-dev"
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+  $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw -Path $KeyPath
+}
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "urice-local-dev"
+}
 
 $cmd = "`"$VsDevCmd`" -arch=x64 && set `"PATH=C:\Program Files\nodejs;%USERPROFILE%\.cargo\bin;%PATH%`" && npm run tauri:build"
 cmd.exe /d /s /c $cmd

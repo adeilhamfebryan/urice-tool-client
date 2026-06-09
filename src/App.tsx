@@ -1,6 +1,8 @@
 ﻿import { motion } from "framer-motion";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import {
   Activity,
   FileText,
@@ -14,7 +16,7 @@ import {
   Sparkles,
   Sun,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import logoUrl from "./assets/urice_logo.ico";
 import { BrandScene } from "./components/BrandScene";
 import { ToolCard } from "./components/ToolCard";
@@ -84,6 +86,35 @@ export function App() {
       ...current,
     ].slice(0, 100));
   }
+
+  async function checkForUpdates(manual = false) {
+    try {
+      const update = await check();
+      if (!update) {
+        if (manual) {
+          await message("URice Tools Client sudah versi terbaru.", { title: "No Update Available", kind: "info" });
+        }
+        return;
+      }
+
+      const approved = await confirm(
+        `URice Tools Client versi ${update.version} tersedia.\n\nInstall update sekarang?`,
+        { title: "Update Available", kind: "info" },
+      );
+      if (!approved) return;
+
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (error) {
+      if (manual) {
+        await message(`Gagal memeriksa update: ${String(error)}`, { title: "Update Check Failed", kind: "error" });
+      }
+    }
+  }
+
+  useEffect(() => {
+    void checkForUpdates(false);
+  }, []);
 
   async function selectExcelTarget() {
     const picked = await save({
@@ -228,6 +259,10 @@ export function App() {
                 {settings.themeMode === "dark" ? <Sun size={16} /> : <Moon size={16} />}
                 Switch to {settings.themeMode === "dark" ? "Light" : "Dark"} Theme
               </button>
+              <button className="secondary-button" type="button" onClick={() => void checkForUpdates(true)}>
+                <RefreshCw size={16} />
+                Check for Updates
+              </button>
             </div>
           </section>
         )}
@@ -235,3 +270,6 @@ export function App() {
     </main>
   );
 }
+
+
+

@@ -11,5 +11,4 @@ tmp-workflow-test*/
 *.pyc
 .env
 .DS_Store
-src-tauri/keys/*.key
-src-tauri/keys/*.key.pub
+src-tauri/keys/

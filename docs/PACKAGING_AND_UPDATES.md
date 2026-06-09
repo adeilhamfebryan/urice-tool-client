@@ -32,6 +32,15 @@ Use Tauri updater with GitHub Releases. Production release work must include:
 - version bump policy
 - rollback plan
 
+## GitHub Releases Auto Updater
+
+- 2026-06-09 07:33:00 WIB - Auto updater distribution is configured to use GitHub Releases at `https://github.com/adeilhamfebryan/urice-tool-client/releases/latest/download/latest.json`.
+- The updater signing private key must be stored in GitHub Actions Secrets, not in the repository. This repository expects the private key secret name `ANAK` and the key password secret name `YATIM`.
+- The public updater key is stored in `src-tauri/tauri.conf.json`.
+- Release builds are produced by `.github/workflows/release.yml`.
+- To prepare a new update, increment the app version in `package.json` and `src-tauri/tauri.conf.json`, commit the change, then push a tag such as `v0.1.1`.
+- The workflow creates a draft GitHub Release with the Windows setup installer, updater signature, and `latest.json`. Publish the draft after verifying the release assets.
+
 ## Installer Mode
 
 For non-technical Windows users, the preferred installer mode is passive/simple with desktop and Start Menu shortcuts. Advanced settings should live inside the app, not the installer wizard.

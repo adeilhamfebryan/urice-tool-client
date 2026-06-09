@@ -47,7 +47,7 @@
                     "updater":  {
                                     "active":  true,
                                     "endpoints":  [
-                                                      "https://github.com/OWNER/urice-tools-client/releases/latest/download/latest.json"
+                                                      "https://github.com/adeilhamfebryan/urice-tool-client/releases/latest/download/latest.json"
                                                   ],
                                     "windows":  {
                                                     "installMode":  "passive"
