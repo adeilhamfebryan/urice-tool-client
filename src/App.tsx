@@ -32,40 +32,10 @@ type UpdatePhase = "idle" | "checking" | "available" | "downloading" | "installi
 
 export type HistoryEntry = {
   time: string;
+  tool: string;
   action: string;
   detail: string;
 };
-
-const tools = [
-  {
-    title: "PO PDF Manager",
-    description: "Extract PO data from scanned PDFs, review OCR output, and export clean Excel rows. Requested by Commercial Division CPI Lampung.",
-    status: "Intellegence tools make you more efficience",
-    icon: FileText,
-    view: "po" as const,
-  },
-  {
-    title: "Batch Automation",
-    description: "Queue folder jobs and keep OCR work running in the background.",
-    status: "Operational",
-    icon: Activity,
-    view: "po" as const,
-  },
-  {
-    title: "Auto Update",
-    description: "Check and install signed GitHub release updates directly from Settings without command-line work.",
-    status: "Enabled",
-    icon: RefreshCw,
-    view: "settings" as const,
-  },
-  {
-    title: "Excel Merger",
-    description: "Normalize SAP, PB, PI, and COM Excel exports through reusable column mapping.",
-    status: "V1.1.0 Foundation",
-    icon: FileSpreadsheet,
-    view: "merger" as const,
-  },
-];
 
 const navItems = [
   { view: "dashboard" as const, label: "Dashboard", icon: Sparkles },
@@ -114,9 +84,9 @@ export function App() {
     setSettings((current) => ({ ...current, ...patch }));
   }
 
-  function addHistory(action: string, detail: string) {
+  function addHistory(action: string, detail: string, tool = "System") {
     setHistory((current) => [
-      { time: new Date().toLocaleString(), action, detail },
+      { time: new Date().toLocaleString(), tool, action, detail },
       ...current,
     ].slice(0, 100));
   }
@@ -236,7 +206,7 @@ export function App() {
     if (typeof picked === "string") {
       await invoke("ensure_excel", { excelPath: picked, fieldKeys: settings.selectedExtractionFields });
       updateSettings({ excelPath: picked });
-      addHistory("Excel target selected", picked);
+      addHistory("Excel target selected", picked, "Settings");
     }
   }
 
@@ -256,6 +226,41 @@ export function App() {
         ? settings.selectedExtractionFields.filter((field) => field !== key)
         : [...settings.selectedExtractionFields, key],
     });
+  }
+
+  const dashboardTools = [
+    {
+      title: "PO PDF Manager",
+      description: "Extract PO data from scanned PDFs, review OCR output, and export clean Excel rows.",
+      status: "Requested by Commercial Division CPI Lampung",
+      icon: FileText,
+      view: "po" as const,
+    },
+    {
+      title: "Batch Automation",
+      description: "Queue folder jobs and keep OCR work running in the background.",
+      status: "Feature for PO Manager",
+      icon: Activity,
+      view: "po" as const,
+    },
+    {
+      title: "Auto Update",
+      description: "Check and install signed GitHub release updates directly from Settings without command-line work.",
+      status: `Current version: ${appVersion}`,
+      icon: RefreshCw,
+      view: "settings" as const,
+    },
+    {
+      title: "Excel Merger",
+      description: "Normalize many excel column format to your format.",
+      status: "Requested by Commercial Division CPI Lampung",
+      icon: FileSpreadsheet,
+      view: "merger" as const,
+    },
+  ];
+
+  function historyTagClass(tool: string) {
+    return tool.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
   return (
@@ -330,17 +335,17 @@ export function App() {
             </header>
 
             <section className="tool-grid" aria-label="Tool modules">
-              {tools.map((tool) => <ToolCard key={tool.title} {...tool} onClick={() => setActiveView(tool.view)} />)}
+              {dashboardTools.map((tool) => <ToolCard key={tool.title} {...tool} onClick={() => setActiveView(tool.view)} />)}
             </section>
           </>
         )}
 
         <div hidden={activeView !== "po"}>
-          <PoPdfManager settings={settings} updateSettings={updateSettings} addHistory={addHistory} />
+          <PoPdfManager settings={settings} updateSettings={updateSettings} addHistory={(action, detail) => addHistory(action, detail, "PO Manager")} />
         </div>
 
         <div hidden={activeView !== "merger"}>
-          <ExcelMerger settings={settings} addHistory={addHistory} />
+          <ExcelMerger settings={settings} addHistory={(action, detail) => addHistory(action, detail, "Excel Merger")} />
         </div>
 
         {activeView === "history" && (
@@ -350,6 +355,7 @@ export function App() {
             <div className="history-list">
               {history.length ? history.map((entry, index) => (
                 <article className="history-item" key={`${entry.time}-${index}`}>
+                  <span className={`history-tag ${historyTagClass(entry.tool)}`}>{entry.tool}</span>
                   <strong>{entry.action}</strong>
                   <span>{entry.time}</span>
                   <p>{entry.detail}</p>

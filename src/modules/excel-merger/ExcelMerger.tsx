@@ -83,18 +83,24 @@ export function ExcelMerger({ addHistory }: Props) {
   }
 
   async function addSources() {
+    log("Opening Excel source picker.");
     const picked = await open({
       multiple: true,
       filters: [{ name: "Excel Workbook", extensions: ["xlsx", "xlsm", "xltx", "xltm"] }],
     });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
-    if (!paths.length) return;
+    if (!paths.length) {
+      log("Excel source picker cancelled.");
+      return;
+    }
 
     setIsInspecting(true);
     setMessage(`Reading ${paths.length} Excel source file(s)...`);
+    log(`Selected ${paths.length} Excel source file(s).`);
     try {
       const inspected: MergerSource[] = [];
-      for (const path of paths) {
+      for (const [index, path] of paths.entries()) {
+        log(`Inspecting ${index + 1}/${paths.length}: ${fileName(path)}`);
         log(`Reading headers: ${path}`);
         const result = await invoke<InspectExcelResponse>("inspect_excel_headers", { path });
         if (!result.ok) {
@@ -102,6 +108,9 @@ export function ExcelMerger({ addHistory }: Props) {
           continue;
         }
         const mapping = Object.fromEntries(result.headers.map((header) => [header, suggestMapping(header)]));
+        for (const [header, target] of Object.entries(mapping)) {
+          log(target ? `Auto mapped "${header}" -> ${target}` : `No auto mapping for "${header}"`);
+        }
         inspected.push({
           path: result.path,
           sourceName: guessSourceName(result.path),
@@ -114,6 +123,7 @@ export function ExcelMerger({ addHistory }: Props) {
       }
       setSources((current) => [...current, ...inspected]);
       setMessage(`${inspected.length} source file(s) ready for mapping.`);
+      log(`Source list updated. Total loaded source(s): ${sources.length + inspected.length}.`);
       addHistory("Excel source inspected", `${inspected.length} workbook(s) loaded for merger mapping`);
     } catch (error) {
       setMessage(`Failed to inspect Excel source: ${String(error)}`);
@@ -124,10 +134,14 @@ export function ExcelMerger({ addHistory }: Props) {
   }
 
   function updateSource(index: number, patch: Partial<MergerSource>) {
+    if (patch.sourceName) {
+      log(`Source type changed for ${fileName(sources[index]?.path || "")}: ${patch.sourceName}`);
+    }
     setSources((current) => current.map((source, sourceIndex) => (sourceIndex === index ? { ...source, ...patch } : source)));
   }
 
   function updateMapping(sourceIndex: number, header: string, target: MergerStandardColumn | "") {
+    log(`Mapping changed: ${fileName(sources[sourceIndex]?.path || "")} / "${header}" -> ${target || "Do not import"}`);
     setSources((current) =>
       current.map((source, index) =>
         index === sourceIndex ? { ...source, mapping: { ...source.mapping, [header]: target } } : source,
@@ -144,7 +158,10 @@ export function ExcelMerger({ addHistory }: Props) {
       defaultPath: "URice_Merged_Data.xlsx",
       filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
     });
-    if (typeof outputPath !== "string") return;
+    if (typeof outputPath !== "string") {
+      log("Export save dialog cancelled.");
+      return;
+    }
 
     setIsMerging(true);
     setMessage("Merging normalized Excel data...");
@@ -155,7 +172,12 @@ export function ExcelMerger({ addHistory }: Props) {
         source_name: source.sourceName,
         mapping: Object.fromEntries(Object.entries(source.mapping).filter(([_header, target]) => target)),
       }));
+      for (const source of payload) {
+        log(`Preparing ${source.source_name}: ${Object.keys(source.mapping).length} mapped column(s).`);
+      }
+      log(`Sending ${payload.length} source(s) to merger engine.`);
       const result = await invoke<MergeResponse>("merge_excel_sources", { outputPath, sources: payload });
+      log(`Merger engine returned output: ${result.output_path}`);
       setMessage(`Merged ${result.row_count} row(s) into ${result.output_path}`);
       log(`Merge completed: ${result.row_count} row(s), ${result.headers.length} output column(s).`);
       for (const source of result.sources) {
@@ -200,7 +222,10 @@ export function ExcelMerger({ addHistory }: Props) {
                 <span className="settings-label">{fileName(source.path)}</span>
                 <strong>{source.rowCount} row(s) in {source.sheet}</strong>
               </div>
-              <button className="secondary-button compact-button" type="button" onClick={() => setSources((current) => current.filter((_source, index) => index !== sourceIndex))}>
+              <button className="secondary-button compact-button" type="button" onClick={() => {
+                log(`Removed source: ${fileName(source.path)}`);
+                setSources((current) => current.filter((_source, index) => index !== sourceIndex));
+              }}>
                 <Trash2 size={15} />
                 Remove
               </button>

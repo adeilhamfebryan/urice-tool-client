@@ -184,7 +184,12 @@ p { color: #b8b3aa; line-height: 1.55; }
   border-radius: 8px;
   background: rgba(255,255,255,0.045);
 }
-.tool-card { padding: 18px; }
+.tool-card {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 218px;
+  padding: 18px;
+}
 .tool-card.clickable {
   cursor: pointer;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
@@ -206,7 +211,7 @@ p { color: #b8b3aa; line-height: 1.55; }
   color: #f4d27a;
   margin-bottom: 14px;
 }
-.tool-card span { color: #f4d27a; font-size: 13px; font-weight: 700; }
+.tool-card span { align-self: end; color: #f4d27a; font-size: 13px; font-weight: 700; }
 
 .work-panel { padding: 22px; }
 .panel-header, .action-row {
@@ -455,6 +460,12 @@ p { color: #b8b3aa; line-height: 1.55; }
   background: rgba(255,255,255,0.06);
 }
 
+.merger-source-card select option,
+.settings-grid select option {
+  color: #1c1c1e;
+  background: #ffffff;
+}
+
 .settings-card {
   display: grid;
   gap: 10px;
@@ -638,6 +649,38 @@ p { color: #b8b3aa; line-height: 1.55; }
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px;
   background: rgba(255,255,255,0.035);
+}
+
+.history-tag {
+  display: inline-flex !important;
+  width: fit-content;
+  margin: 0 0 8px !important;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #f8ead0 !important;
+  background: rgba(217,164,65,0.14);
+  font-size: 11px !important;
+  font-weight: 800;
+}
+
+.history-tag.po-manager {
+  color: #f4d27a !important;
+  background: rgba(217,164,65,0.14);
+}
+
+.history-tag.excel-merger {
+  color: #d9f7e1 !important;
+  background: rgba(67,160,96,0.18);
+}
+
+.history-tag.system {
+  color: #d8d7ff !important;
+  background: rgba(100,95,210,0.18);
+}
+
+.history-tag.settings {
+  color: #d8d7ff !important;
+  background: rgba(100,95,210,0.18);
 }
 
 .history-item span {
