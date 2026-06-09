@@ -6,6 +6,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LegacyRoot = Split-Path -Parent $ProjectRoot
 $VsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 $KeyPath = Join-Path $ProjectRoot "src-tauri\keys\urice.key"
+$KeyPasswordPath = Join-Path $ProjectRoot "src-tauri\keys\secret.txt"
 $TesseractSource = if ($env:TESSERACT_PORTABLE_DIR) { $env:TESSERACT_PORTABLE_DIR } else { Join-Path $LegacyRoot "tesseract_portable" }
 $TesseractExe = Join-Path $TesseractSource "tesseract.exe"
 $IndData = Join-Path $TesseractSource "tessdata\ind.traineddata"
@@ -39,7 +40,11 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw -Path $KeyPath
 }
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "urice-local-dev"
+  if (Test-Path -LiteralPath $KeyPasswordPath) {
+    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = (Get-Content -Raw -Path $KeyPasswordPath).Trim()
+  } else {
+    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "urice-local-dev"
+  }
 }
 
 $cmd = "`"$VsDevCmd`" -arch=x64 && set `"PATH=C:\Program Files\nodejs;%USERPROFILE%\.cargo\bin;%PATH%`" && npm run tauri:build"

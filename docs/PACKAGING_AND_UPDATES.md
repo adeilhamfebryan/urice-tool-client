@@ -40,6 +40,7 @@ Use Tauri updater with GitHub Releases. Production release work must include:
 - 2026-06-09 19:57:29 WIB - The local 0.1.0 installer was rebuilt from the updater-enabled UI and should be used as the baseline install for update testing. The next GitHub updater release target is 0.1.3 because tags 0.1.1 and 0.1.2 were already used for earlier signing-secret tests.
 - 2026-06-09 20:25:29 WIB - If GitHub Releases does not yet contain `latest.json`, the app now explains that no update package is available on the server. A valid update still requires the release workflow to finish signing and publishing updater artifacts.
 - 2026-06-09 20:59:37 WIB - The project now uses the newly generated updater key pair `urice.key` / `urice.key.pub`. The GitHub Actions private key secret remains `ANAK`, the password secret remains `YATIM`, and the app public key in `tauri.conf.json` must match `urice.key.pub`.
+- 2026-06-09 21:32:21 WIB - Local release builds now read the updater key password from `src-tauri/keys/secret.txt` when that ignored file exists. Keep this file local only and ensure it matches the password stored in GitHub Actions secret `YATIM`.
 - The updater signing private key must be stored in GitHub Actions Secrets, not in the repository. This repository expects the private key secret name `ANAK` and the key password secret name `YATIM`.
 - The public updater key is stored in `src-tauri/tauri.conf.json`.
 - Release builds are produced by `.github/workflows/release.yml`.
