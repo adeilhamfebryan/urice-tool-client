@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+backend/build/
+backend/dist/
+backend/*.spec
+backend/.venv/
+__pycache__/
+.pytest_cache/
+tmp-workflow-test*/
+*.pyc
+.env
+.DS_Store
+src-tauri/keys/*.key
+src-tauri/keys/*.key.pub

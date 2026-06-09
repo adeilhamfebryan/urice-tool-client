@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Capabilities for URice Tools Client desktop shell","local":true,"windows":["main"],"permissions":["dialog:default","fs:default","opener:default","process:default","shell:default","updater:default"]}}
