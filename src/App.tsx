@@ -1,6 +1,7 @@
 ﻿import { motion } from "framer-motion";
 import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import {
@@ -69,6 +70,7 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewName>("po");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [appVersion, setAppVersion] = useState<string>("0.1.1");
   const [settings, setSettings] = useState<AppSettings>({
     excelPath: "",
     processedOutputFolder: "",
@@ -114,6 +116,7 @@ export function App() {
 
   useEffect(() => {
     void checkForUpdates(false);
+    getVersion().then(setAppVersion).catch(() => undefined);
   }, []);
 
   async function selectExcelTarget() {
@@ -240,6 +243,10 @@ export function App() {
             <p className="eyebrow"><Settings size={14} /> Settings</p>
             <h2>Application Settings</h2>
             <div className="settings-grid">
+              <label>
+                Application Version
+                <input value={`URice Tools Client v${appVersion}`} readOnly />
+              </label>
               <label>
                 Excel Target
                 <input value={settings.excelPath || "Belum dipilih"} readOnly />

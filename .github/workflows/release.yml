@@ -72,6 +72,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: "URice Tools Client v__VERSION__"
           releaseBody: "URice Tools Client release. Download and run the Windows setup installer."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
