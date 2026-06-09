@@ -27,7 +27,7 @@ import { ToolCard } from "./components/ToolCard";
 import { ExcelMerger } from "./modules/excel-merger/ExcelMerger";
 import { PoPdfManager } from "./modules/po-pdf-manager/PoPdfManager";
 
-type ViewName = "po" | "merger" | "history" | "settings";
+type ViewName = "dashboard" | "po" | "merger" | "history" | "settings";
 type UpdatePhase = "idle" | "checking" | "available" | "downloading" | "installing" | "restarting" | "error";
 
 export type HistoryEntry = {
@@ -42,28 +42,33 @@ const tools = [
     description: "Extract PO data from scanned PDFs, review OCR output, and export clean Excel rows. Requested by Commercial Division CPI Lampung.",
     status: "Intellegence tools make you more efficience",
     icon: FileText,
+    view: "po" as const,
   },
   {
     title: "Batch Automation",
     description: "Queue folder jobs and keep OCR work running in the background.",
     status: "Operational",
     icon: Activity,
+    view: "po" as const,
   },
   {
     title: "Auto Update",
     description: "Check and install signed GitHub release updates directly from Settings without command-line work.",
     status: "Enabled",
     icon: RefreshCw,
+    view: "settings" as const,
   },
   {
     title: "Excel Merger",
     description: "Normalize SAP, PB, PI, and COM Excel exports through reusable column mapping.",
     status: "V1.1.0 Foundation",
     icon: FileSpreadsheet,
+    view: "merger" as const,
   },
 ];
 
 const navItems = [
+  { view: "dashboard" as const, label: "Dashboard", icon: Sparkles },
   { view: "po" as const, label: "PO Manager", icon: FileText },
   { view: "merger" as const, label: "Excel Merger", icon: FileSpreadsheet },
   { view: "history" as const, label: "History", icon: Activity },
@@ -91,7 +96,7 @@ function formatBytes(bytes: number) {
 }
 
 export function App() {
-  const [activeView, setActiveView] = useState<ViewName>("po");
+  const [activeView, setActiveView] = useState<ViewName>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [appVersion, setAppVersion] = useState<string>("loading...");
@@ -308,7 +313,7 @@ export function App() {
           </div>
         </header>
 
-        {(activeView === "po" || activeView === "merger") && (
+        {activeView === "dashboard" && (
           <>
             <header className="hero-band">
               <div className="hero-copy">
@@ -325,7 +330,7 @@ export function App() {
             </header>
 
             <section className="tool-grid" aria-label="Tool modules">
-              {tools.map((tool) => <ToolCard key={tool.title} {...tool} />)}
+              {tools.map((tool) => <ToolCard key={tool.title} {...tool} onClick={() => setActiveView(tool.view)} />)}
             </section>
           </>
         )}

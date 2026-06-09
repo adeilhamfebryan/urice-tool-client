@@ -185,6 +185,17 @@ p { color: #b8b3aa; line-height: 1.55; }
   background: rgba(255,255,255,0.045);
 }
 .tool-card { padding: 18px; }
+.tool-card.clickable {
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+.tool-card.clickable:hover,
+.tool-card.clickable:focus-visible {
+  border-color: rgba(244,210,122,0.34);
+  background: rgba(217,164,65,0.075);
+  outline: none;
+  transform: translateY(-1px);
+}
 .tool-icon {
   width: 42px;
   height: 42px;
