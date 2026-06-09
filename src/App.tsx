@@ -66,6 +66,18 @@ const navItems = [
   { view: "settings" as const, label: "Settings", icon: Settings },
 ];
 
+function formatUpdateError(error: unknown) {
+  const messageText = String(error);
+  if (
+    messageText.includes("Could not fetch a valid release JSON") ||
+    messageText.includes("404") ||
+    messageText.includes("latest.json")
+  ) {
+    return "Belum ada paket update yang tersedia di server. Ini normal sebelum release GitHub pertama berhasil dipublish.";
+  }
+  return `Gagal memeriksa update: ${messageText}`;
+}
+
 export function App() {
   const [activeView, setActiveView] = useState<ViewName>("po");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -117,9 +129,10 @@ export function App() {
       setUpdateStatus("Update installed. Restarting URice Tools Client...");
       await relaunch();
     } catch (error) {
-      setUpdateStatus(`Update check failed: ${String(error)}`);
+      const friendlyError = formatUpdateError(error);
+      setUpdateStatus(friendlyError);
       if (manual) {
-        await message(`Gagal memeriksa update: ${String(error)}`, { title: "Update Check Failed", kind: "error" });
+        await message(friendlyError, { title: "Update Check Failed", kind: "error" });
       }
     }
   }
