@@ -3,7 +3,7 @@ import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
+import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Activity,
   FileText,
@@ -20,17 +20,21 @@ import {
 import { useEffect, useState } from "react";
 import logoUrl from "./assets/urice_logo.ico";
 import { BrandScene } from "./components/BrandScene";
+import { defaultExtractionFields, extractionFieldOptions, type ExtractionFieldKey } from "./config/extractionFields";
 import { ToolCard } from "./components/ToolCard";
 import { PoPdfManager } from "./modules/po-pdf-manager/PoPdfManager";
 
 type ViewName = "po" | "history" | "settings";
 type ThemeMode = "dark" | "light";
+type UpdatePhase = "idle" | "checking" | "available" | "downloading" | "installing" | "restarting" | "error";
 
 export type AppSettings = {
   excelPath: string;
   processedOutputFolder: string;
   sourceArchiveFolder: string;
   themeMode: ThemeMode;
+  selectedExtractionFields: ExtractionFieldKey[];
+  batchConcurrency: number;
 };
 
 export type HistoryEntry = {
@@ -78,17 +82,32 @@ function formatUpdateError(error: unknown) {
   return `Gagal memeriksa update: ${messageText}`;
 }
 
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
 export function App() {
   const [activeView, setActiveView] = useState<ViewName>("po");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [appVersion, setAppVersion] = useState<string>("0.1.0");
   const [updateStatus, setUpdateStatus] = useState<string>("Auto checker will run when the app starts.");
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateDownloaded, setUpdateDownloaded] = useState(0);
+  const [updateTotal, setUpdateTotal] = useState<number | null>(null);
+  const [updateTargetVersion, setUpdateTargetVersion] = useState<string>("");
   const [settings, setSettings] = useState<AppSettings>({
     excelPath: "",
     processedOutputFolder: "",
     sourceArchiveFolder: "",
     themeMode: "dark",
+    selectedExtractionFields: defaultExtractionFields,
+    batchConcurrency: 2,
   });
 
   function updateSettings(patch: Partial<AppSettings>) {
@@ -104,9 +123,15 @@ export function App() {
 
   async function checkForUpdates(manual = false) {
     try {
+      setUpdatePhase("checking");
+      setUpdateProgress(0);
+      setUpdateDownloaded(0);
+      setUpdateTotal(null);
+      setUpdateTargetVersion("");
       setUpdateStatus(manual ? "Checking for updates..." : "Auto checking for updates...");
       const update = await check();
       if (!update) {
+        setUpdatePhase("idle");
         setUpdateStatus("URice Tools Client is already up to date.");
         if (manual) {
           await message("URice Tools Client sudah versi terbaru.", { title: "No Update Available", kind: "info" });
@@ -114,22 +139,55 @@ export function App() {
         return;
       }
 
+      setUpdatePhase("available");
+      setUpdateTargetVersion(update.version);
       setUpdateStatus(`Update ${update.version} is available.`);
       const approved = await confirm(
         `URice Tools Client versi ${update.version} tersedia.\n\nInstall update sekarang?`,
         { title: "Update Available", kind: "info" },
       );
       if (!approved) {
+        setUpdatePhase("idle");
         setUpdateStatus(`Update ${update.version} is available but was postponed.`);
         return;
       }
 
+      let downloadedBytes = 0;
+      let totalBytes: number | null = null;
+      setUpdatePhase("downloading");
       setUpdateStatus(`Downloading and installing update ${update.version}...`);
-      await update.downloadAndInstall();
+      await update.downloadAndInstall((event: DownloadEvent) => {
+        if (event.event === "Started") {
+          downloadedBytes = 0;
+          totalBytes = event.data.contentLength ?? null;
+          setUpdateDownloaded(0);
+          setUpdateTotal(totalBytes);
+          setUpdateProgress(0);
+          setUpdateStatus(totalBytes ? `Downloading update ${update.version} (0 / ${formatBytes(totalBytes)})...` : `Downloading update ${update.version}...`);
+        }
+        if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          setUpdateDownloaded(downloadedBytes);
+          if (totalBytes) {
+            const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
+            setUpdateProgress(percent);
+            setUpdateStatus(`Downloading update ${update.version}: ${percent}% (${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)})`);
+          } else {
+            setUpdateStatus(`Downloading update ${update.version}: ${formatBytes(downloadedBytes)} received`);
+          }
+        }
+        if (event.event === "Finished") {
+          setUpdatePhase("installing");
+          setUpdateProgress(100);
+          setUpdateStatus(`Installing update ${update.version}...`);
+        }
+      });
+      setUpdatePhase("restarting");
       setUpdateStatus("Update installed. Restarting URice Tools Client...");
       await relaunch();
     } catch (error) {
       const friendlyError = formatUpdateError(error);
+      setUpdatePhase("error");
       setUpdateStatus(friendlyError);
       if (manual) {
         await message(friendlyError, { title: "Update Check Failed", kind: "error" });
@@ -148,7 +206,7 @@ export function App() {
       filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
     });
     if (typeof picked === "string") {
-      await invoke("ensure_excel", { excelPath: picked });
+      await invoke("ensure_excel", { excelPath: picked, fieldKeys: settings.selectedExtractionFields });
       updateSettings({ excelPath: picked });
       addHistory("Excel target selected", picked);
     }
@@ -162,6 +220,14 @@ export function App() {
   async function chooseSourceArchiveFolder() {
     const picked = await open({ directory: true, multiple: false });
     if (typeof picked === "string") updateSettings({ sourceArchiveFolder: picked });
+  }
+
+  function toggleExtractionField(key: ExtractionFieldKey) {
+    updateSettings({
+      selectedExtractionFields: settings.selectedExtractionFields.includes(key)
+        ? settings.selectedExtractionFields.filter((field) => field !== key)
+        : [...settings.selectedExtractionFields, key],
+    });
   }
 
   return (
@@ -270,10 +336,28 @@ export function App() {
                 Application Version
                 <input value={`URice Tools Client v${appVersion}`} readOnly />
               </label>
-              <label>
-                Auto Update Status
-                <input value={updateStatus} readOnly />
-              </label>
+              <div className="settings-card update-card">
+                <div>
+                  <span className="settings-label">Auto Update</span>
+                  <strong>{updateTargetVersion ? `Target v${updateTargetVersion}` : "Signed GitHub Releases"}</strong>
+                </div>
+                <div className="update-progress" aria-label="Update progress">
+                  <div
+                    className={`update-progress-bar ${updatePhase}`}
+                    style={{ width: `${updatePhase === "checking" ? 18 : updateProgress}%` }}
+                  />
+                </div>
+                <p>{updateStatus}</p>
+                {(updatePhase === "downloading" || updateDownloaded > 0) && (
+                  <span className="update-bytes">
+                    {formatBytes(updateDownloaded)}{updateTotal ? ` / ${formatBytes(updateTotal)}` : ""} downloaded
+                  </span>
+                )}
+                <button className="secondary-button" type="button" onClick={() => void checkForUpdates(true)} disabled={["checking", "downloading", "installing", "restarting"].includes(updatePhase)}>
+                  <RefreshCw size={16} />
+                  {updatePhase === "checking" ? "Checking..." : "Check for Updates"}
+                </button>
+              </div>
               <label>
                 Excel Target
                 <input value={settings.excelPath || "Belum dipilih"} readOnly />
@@ -289,13 +373,47 @@ export function App() {
                 <input value={settings.sourceArchiveFolder || "Opsional / belum dipilih"} readOnly />
                 <button className="secondary-button" type="button" onClick={chooseSourceArchiveFolder}>Choose Archive Folder</button>
               </label>
+              <div className="settings-card field-picker-card">
+                <div className="settings-card-header">
+                  <div>
+                    <span className="settings-label">OCR / Excel Fields</span>
+                    <strong>{settings.selectedExtractionFields.length} field selected</strong>
+                  </div>
+                  <button className="secondary-button compact-button" type="button" onClick={() => updateSettings({ selectedExtractionFields: defaultExtractionFields })}>
+                    Reset
+                  </button>
+                </div>
+                <div className="field-picker-list">
+                  {extractionFieldOptions.map((field) => (
+                    <label className="checkbox-row" key={field.key}>
+                      <input
+                        type="checkbox"
+                        checked={settings.selectedExtractionFields.includes(field.key)}
+                        onChange={() => toggleExtractionField(field.key)}
+                      />
+                      <span>
+                        <strong>{field.label}</strong>
+                        <small>{field.hint}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <label>
+                Batch Processing Threads
+                <select
+                  value={settings.batchConcurrency}
+                  onChange={(event) => updateSettings({ batchConcurrency: Number(event.target.value) })}
+                >
+                  <option value={1}>1 thread - safest</option>
+                  <option value={2}>2 threads - recommended</option>
+                  <option value={3}>3 threads - faster</option>
+                  <option value={4}>4 threads - heavier</option>
+                </select>
+              </label>
               <button className="secondary-button" type="button" onClick={() => updateSettings({ themeMode: settings.themeMode === "dark" ? "light" : "dark" })}>
                 {settings.themeMode === "dark" ? <Sun size={16} /> : <Moon size={16} />}
                 Switch to {settings.themeMode === "dark" ? "Light" : "Dark"} Theme
-              </button>
-              <button className="secondary-button" type="button" onClick={() => void checkForUpdates(true)}>
-                <RefreshCw size={16} />
-                Check for Updates
               </button>
             </div>
           </section>

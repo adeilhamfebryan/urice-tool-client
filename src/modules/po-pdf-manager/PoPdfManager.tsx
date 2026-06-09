@@ -3,6 +3,7 @@ import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, FileUp, Loader2, Play, Save, Table2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppSettings } from "../../App";
+import { extractionFieldOptions, type ExtractionFieldKey } from "../../config/extractionFields";
 
 type HealthResponse = {
   ok: boolean;
@@ -16,6 +17,13 @@ type ExtractionRow = {
   no_op: string;
   vendor_name: string;
   vendor_code: string;
+  item?: string;
+  nomor_item?: string;
+  nama_barang?: string;
+  quantity?: string;
+  satuan?: string;
+  harga_satuan?: string;
+  total?: string;
 };
 
 type ProcessResponse = {
@@ -46,10 +54,17 @@ type CorrectedRecord = {
   nomor_op: string;
   nama_vendor: string;
   nomor_vendor: string;
+  nomor_item: string;
+  nama_barang: string;
+  quantity: string;
+  satuan: string;
+  harga_satuan: string;
+  total: string;
   keterangan: string;
   status: string;
   source_pdf?: string;
   processed_pdf?: string;
+  _selected_fields?: ExtractionFieldKey[];
 };
 
 type Props = {
@@ -58,15 +73,7 @@ type Props = {
   addHistory: (action: string, detail: string) => void;
 };
 
-const editableColumns: Array<{ key: keyof CorrectedRecord; label: string; placeholder?: string }> = [
-  { key: "tanggal_diproses", label: "Tanggal Diproses" },
-  { key: "company_name", label: "Company Name" },
-  { key: "nomor_op", label: "Nomor OP" },
-  { key: "nama_vendor", label: "Nama Vendor" },
-  { key: "nomor_vendor", label: "Nomor Vendor" },
-  { key: "keterangan", label: "Keterangan", placeholder: "Isi manual" },
-  { key: "status", label: "Status", placeholder: "Isi manual" },
-];
+const manualFieldKeys = new Set<ExtractionFieldKey>(["keterangan", "status"]);
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() || path;
@@ -84,6 +91,13 @@ export function PoPdfManager({ settings, addHistory }: Props) {
   const [batchFolder, setBatchFolder] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
   const [previewRows, setPreviewRows] = useState<CorrectedRecord[]>([]);
+  const editableColumns = extractionFieldOptions
+    .filter((field) => settings.selectedExtractionFields.includes(field.key))
+    .map((field) => ({
+      key: field.key,
+      label: field.label,
+      placeholder: manualFieldKeys.has(field.key) ? "Isi manual" : undefined,
+    }));
 
   function log(line: string) {
     setLogs((current) => [`${new Date().toLocaleTimeString()} - ${line}`, ...current].slice(0, 200));
@@ -115,10 +129,17 @@ export function PoPdfManager({ settings, addHistory }: Props) {
       nomor_op: first?.no_op || "",
       nama_vendor: first?.vendor_name || "",
       nomor_vendor: first?.vendor_code || "",
+      nomor_item: first?.nomor_item || first?.item || "",
+      nama_barang: first?.nama_barang || "",
+      quantity: first?.quantity || "",
+      satuan: first?.satuan || "",
+      harga_satuan: first?.harga_satuan || "",
+      total: first?.total || "",
       keterangan: "",
       status: "",
       source_pdf: result.source,
       processed_pdf: result.processed_pdf_path,
+      _selected_fields: settings.selectedExtractionFields,
     };
   }
 
@@ -136,7 +157,7 @@ export function PoPdfManager({ settings, addHistory }: Props) {
     return row;
   }
 
-  function updatePreviewRow(index: number, key: keyof CorrectedRecord, value: string) {
+  function updatePreviewRow(index: number, key: ExtractionFieldKey, value: string) {
     setPreviewRows((current) =>
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)),
     );
@@ -225,28 +246,43 @@ export function PoPdfManager({ settings, addHistory }: Props) {
       }
 
       log(`Found ${list.count} PDF source file(s).`);
+      const concurrency = Math.max(1, Math.min(settings.batchConcurrency || 2, list.files.length, 4));
+      log(`Starting batch processing with ${concurrency} worker(s).`);
       let success = 0;
       let failed = 0;
-      for (let index = 0; index < list.files.length; index += 1) {
-        const pdf = list.files[index];
-        log(`Processing ${index + 1}/${list.files.length}: ${fileName(pdf)}`);
-        log(`OCR reading first page: ${fileName(pdf)}`);
-        const result = await invoke<ProcessResponse>("process_pdf", {
-          path: pdf,
-          outputFolder: settings.processedOutputFolder,
-          sourceArchiveFolder: "",
-        });
-        if (!result.ok) {
-          failed += 1;
-          log(`Failed ${fileName(pdf)}: ${result.error || "unknown error"}`);
-          continue;
+      let nextIndex = 0;
+
+      async function worker(workerNumber: number) {
+        while (nextIndex < list.files.length) {
+          const index = nextIndex;
+          nextIndex += 1;
+          const pdf = list.files[index];
+          log(`Worker ${workerNumber}: processing ${index + 1}/${list.files.length}: ${fileName(pdf)}`);
+          log(`Worker ${workerNumber}: OCR reading first page: ${fileName(pdf)}`);
+          try {
+            const result = await invoke<ProcessResponse>("process_pdf", {
+              path: pdf,
+              outputFolder: settings.processedOutputFolder,
+              sourceArchiveFolder: "",
+            });
+            if (!result.ok) {
+              failed += 1;
+              log(`Worker ${workerNumber}: failed ${fileName(pdf)}: ${result.error || "unknown error"}`);
+              continue;
+            }
+            success += 1;
+            const row = appendPreview(result);
+            log(`Worker ${workerNumber}: first page saved: ${result.processed_pdf_filename || fileName(result.processed_pdf_path || "")}`);
+            log(`Worker ${workerNumber}: saved to: ${result.processed_pdf_path || "-"}`);
+            log(`Worker ${workerNumber}: preview row added: ${row.nama_vendor || "Vendor kosong"} / ${row.nomor_op || "No OP kosong"}`);
+          } catch (error) {
+            failed += 1;
+            log(`Worker ${workerNumber}: failed ${fileName(pdf)}: ${String(error)}`);
+          }
         }
-        success += 1;
-        const row = appendPreview(result);
-        log(`First page saved: ${result.processed_pdf_filename || fileName(result.processed_pdf_path || "")}`);
-        log(`Saved to: ${result.processed_pdf_path || "-"}`);
-        log(`Preview row added: ${row.nama_vendor || "Vendor kosong"} / ${row.nomor_op || "No OP kosong"}`);
       }
+
+      await Promise.all(Array.from({ length: concurrency }, (_value, index) => worker(index + 1)));
 
       setMessage(`Batch OCR completed: ${success}/${list.count} PDF ready for preview, ${failed} failed. Review rows, then Apply Preview to Excel.`);
       log(`Batch OCR completed: ${success}/${list.count} PDF ready, ${failed} failed.`);
@@ -311,7 +347,7 @@ export function PoPdfManager({ settings, addHistory }: Props) {
       for (const row of previewRows) {
         const result = await invoke<{ ok: boolean; excel_path: string; row: number }>("append_excel_record", {
           excelPath: settings.excelPath,
-          recordJson: JSON.stringify(row),
+          recordJson: JSON.stringify({ ...row, _selected_fields: settings.selectedExtractionFields }),
         });
         lastRow = result.row;
         log(`Excel updated at row ${result.row}: ${row.nomor_op || row.nama_vendor || "preview row"}`);
@@ -394,7 +430,6 @@ export function PoPdfManager({ settings, addHistory }: Props) {
               <th>No</th>
               {editableColumns.map((column) => <th key={column.key}>{column.label}</th>)}
               <th>Source PDF</th>
-              <th>Processed PDF</th>
             </tr>
           </thead>
           <tbody>
@@ -403,19 +438,22 @@ export function PoPdfManager({ settings, addHistory }: Props) {
                 <td>{rowIndex + 1}</td>
                 {editableColumns.map((column) => (
                   <td key={column.key}>
-                    <input
-                      value={String(row[column.key] || "")}
-                      placeholder={column.placeholder}
-                      onChange={(event) => updatePreviewRow(rowIndex, column.key, event.target.value)}
-                    />
+                    {column.key === "processed_pdf" ? (
+                      <span>{row.processed_pdf || <span className="empty-cell">-</span>}</span>
+                    ) : (
+                      <input
+                        value={String(row[column.key] || "")}
+                        placeholder={column.placeholder}
+                        onChange={(event) => updatePreviewRow(rowIndex, column.key, event.target.value)}
+                      />
+                    )}
                   </td>
                 ))}
                 <td>{row.source_pdf || <span className="empty-cell">-</span>}</td>
-                <td>{row.processed_pdf || <span className="empty-cell">-</span>}</td>
               </tr>
             )) : (
               <tr>
-                <td colSpan={10} className="empty-cell">No preview rows yet. Process a single PDF or batch folder first.</td>
+                <td colSpan={editableColumns.length + 2} className="empty-cell">No preview rows yet. Process a single PDF or batch folder first.</td>
               </tr>
             )}
           </tbody>

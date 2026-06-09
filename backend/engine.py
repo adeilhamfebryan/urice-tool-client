@@ -24,19 +24,42 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-EXCEL_HEADERS = [
-    "Tanggal Diproses",
-    "Company Name",
-    "Nomor OP",
-    "Nama Vendor",
-    "Nomor Vendor",
-    "Keterangan",
-    "Status",
+FIELD_HEADERS = {
+    "tanggal_diproses": "Tanggal Diproses",
+    "company_name": "Company Name",
+    "nomor_op": "Nomor OP",
+    "nama_vendor": "Nama Vendor",
+    "nomor_vendor": "Nomor Vendor",
+    "nomor_item": "Nomor Item",
+    "nama_barang": "Nama Barang",
+    "quantity": "Banyaknya / QTY",
+    "satuan": "Satuan",
+    "harga_satuan": "Harga Satuan",
+    "total": "Total",
+    "processed_pdf": "Processed PDF Link",
+    "keterangan": "Keterangan",
+    "status": "Status",
+}
+
+DEFAULT_FIELD_KEYS = [
+    "tanggal_diproses",
+    "company_name",
+    "nomor_op",
+    "nama_vendor",
+    "nomor_vendor",
+    "processed_pdf",
+    "keterangan",
+    "status",
 ]
+
+EXCEL_HEADERS = [FIELD_HEADERS[key] for key in DEFAULT_FIELD_KEYS]
+
+HEADER_TO_FIELD = {header: key for key, header in FIELD_HEADERS.items()}
 
 TEXT_COLUMNS = {
     "Nomor OP",
     "Nomor Vendor",
+    "Nomor Item",
 }
 
 
@@ -165,17 +188,18 @@ def process_pdf(pdf_path: str, output_folder: str, source_archive_folder: str = 
     }
 
 
-def ensure_excel_file(excel_path: str) -> Path:
-    path = Path(excel_path).expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _normalized_field_keys(field_keys: object | None) -> list[str]:
+    if not isinstance(field_keys, list):
+        return DEFAULT_FIELD_KEYS.copy()
+    normalized = [str(key) for key in field_keys if str(key) in FIELD_HEADERS]
+    return normalized or DEFAULT_FIELD_KEYS.copy()
 
-    if path.exists():
-        return path
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Data PO"
+def _headers_for_fields(field_keys: object | None) -> list[str]:
+    return [FIELD_HEADERS[key] for key in _normalized_field_keys(field_keys)]
 
+
+def _apply_header_style(ws, headers: list[str]) -> None:
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="630D16", end_color="630D16", fill_type="solid")
     thin_border = Border(
@@ -185,7 +209,7 @@ def ensure_excel_file(excel_path: str) -> Path:
         bottom=Side(style="thin", color="B4B4B4"),
     )
 
-    for col, header in enumerate(EXCEL_HEADERS, 1):
+    for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
@@ -194,9 +218,60 @@ def ensure_excel_file(excel_path: str) -> Path:
         if header in TEXT_COLUMNS:
             ws.column_dimensions[get_column_letter(col)].number_format = "@"
 
-    widths = [20, 26, 18, 34, 18, 40, 18]
-    for i, width in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = width
+
+def _apply_column_widths(ws, headers: list[str]) -> None:
+    widths = {
+        "Tanggal Diproses": 20,
+        "Company Name": 28,
+        "Nomor OP": 18,
+        "Nama Vendor": 34,
+        "Nomor Vendor": 18,
+        "Nomor Item": 16,
+        "Nama Barang": 42,
+        "Banyaknya / QTY": 18,
+        "Satuan": 14,
+        "Harga Satuan": 18,
+        "Total": 18,
+        "Processed PDF Link": 48,
+        "Keterangan": 40,
+        "Status": 18,
+    }
+    for index, header in enumerate(headers, 1):
+        ws.column_dimensions[get_column_letter(index)].width = widths.get(header, 22)
+
+
+def ensure_excel_file(excel_path: str, field_keys: object | None = None) -> Path:
+    path = Path(excel_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if path.exists():
+        wb = openpyxl.load_workbook(path)
+        ws = wb.active
+        headers = _headers_for_fields(field_keys)
+        existing_headers = [str(cell.value or "").strip() for cell in ws[1] if str(cell.value or "").strip()]
+        if not existing_headers:
+            _apply_header_style(ws, headers)
+            _apply_column_widths(ws, headers)
+        else:
+            next_col = len(existing_headers) + 1
+            for header in headers:
+                if header not in existing_headers:
+                    ws.cell(row=1, column=next_col, value=header)
+                    existing_headers.append(header)
+                    next_col += 1
+            _apply_header_style(ws, existing_headers)
+            _apply_column_widths(ws, existing_headers)
+        ws.freeze_panes = "A2"
+        wb.save(path)
+        wb.close()
+        return path
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data PO"
+    headers = _headers_for_fields(field_keys)
+    _apply_header_style(ws, headers)
+    _apply_column_widths(ws, headers)
     ws.freeze_panes = "A2"
     wb.save(path)
     wb.close()
@@ -204,25 +279,33 @@ def ensure_excel_file(excel_path: str) -> Path:
 
 
 def append_record(excel_path: str, record_json: str) -> dict:
-    path = ensure_excel_file(excel_path)
     record = json.loads(record_json)
+    selected_fields = _normalized_field_keys(record.get("_selected_fields"))
+    path = ensure_excel_file(excel_path, selected_fields)
 
     wb = openpyxl.load_workbook(path)
     ws = wb.active
-    if ws.max_row == 0:
-        ws.append(EXCEL_HEADERS)
+    headers = [str(cell.value or "").strip() for cell in ws[1] if str(cell.value or "").strip()]
+    if not headers:
+        headers = _headers_for_fields(selected_fields)
+        _apply_header_style(ws, headers)
+    values = []
+    for header in headers:
+        field_key = HEADER_TO_FIELD.get(header, "")
+        value = record.get(field_key, "")
+        if header in TEXT_COLUMNS:
+            value = _excel_text(value)
+        values.append(value)
 
-    values = [
-        record.get("tanggal_diproses", ""),
-        record.get("company_name", ""),
-        _excel_text(record.get("nomor_op", "")),
-        record.get("nama_vendor", ""),
-        _excel_text(record.get("nomor_vendor", "")),
-        record.get("keterangan", ""),
-        record.get("status", ""),
-    ]
     ws.append(values)
     last_row = ws.max_row
+    processed_pdf_col = headers.index("Processed PDF Link") + 1 if "Processed PDF Link" in headers else None
+    if processed_pdf_col:
+        pdf_value = str(record.get("processed_pdf", "") or "").strip()
+        if pdf_value:
+            cell = ws.cell(row=last_row, column=processed_pdf_col)
+            cell.hyperlink = pdf_value
+            cell.style = "Hyperlink"
 
     thin_border = Border(
         left=Side(style="thin", color="CCCCCC"),
@@ -230,11 +313,11 @@ def append_record(excel_path: str, record_json: str) -> dict:
         top=Side(style="thin", color="CCCCCC"),
         bottom=Side(style="thin", color="CCCCCC"),
     )
-    for col in range(1, len(EXCEL_HEADERS) + 1):
+    for col in range(1, len(headers) + 1):
         cell = ws.cell(row=last_row, column=col)
         cell.border = thin_border
         cell.alignment = Alignment(vertical="center", wrap_text=True)
-        if EXCEL_HEADERS[col - 1] in TEXT_COLUMNS:
+        if headers[col - 1] in TEXT_COLUMNS:
             cell.number_format = "@"
 
     wb.save(path)
@@ -252,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--extract", metavar="PDF", help="Extract PO data from a PDF and print JSON")
     parser.add_argument("--process", nargs=3, metavar=("PDF", "OUTPUT_FOLDER", "SOURCE_ARCHIVE"), help="Extract PDF and save the first page. Source archive move is handled after Excel apply.")
     parser.add_argument("--ensure-excel", metavar="XLSX", help="Create target Excel if it does not exist")
+    parser.add_argument("--ensure-excel-fields", nargs=2, metavar=("XLSX", "FIELDS_JSON"), help="Create or prepare target Excel with selected fields")
     parser.add_argument("--append-record", nargs=2, metavar=("XLSX", "JSON"), help="Append one corrected PO record to Excel")
     parser.add_argument("--append-record-file", nargs=2, metavar=("XLSX", "JSON_FILE"), help="Append one corrected PO record from a JSON file")
     args = parser.parse_args(argv)
@@ -265,6 +349,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = process_pdf(args.process[0], args.process[1], args.process[2])
         elif args.ensure_excel:
             path = ensure_excel_file(args.ensure_excel)
+            payload = {"ok": True, "excel_path": str(path)}
+        elif args.ensure_excel_fields:
+            field_keys = json.loads(args.ensure_excel_fields[1])
+            path = ensure_excel_file(args.ensure_excel_fields[0], field_keys)
             payload = {"ok": True, "excel_path": str(path)}
         elif args.append_record:
             payload = append_record(args.append_record[0], args.append_record[1])

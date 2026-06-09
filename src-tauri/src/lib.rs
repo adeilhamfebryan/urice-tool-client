@@ -310,16 +310,21 @@ fn collect_pdf_files(dir: &PathBuf, pdfs: &mut Vec<PathBuf>) -> Result<(), std::
 }
 
 #[tauri::command]
-async fn ensure_excel(excel_path: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || ensure_excel_blocking(excel_path)).await.map_err(|error| format!("Excel task failed: {error}"))?
+async fn ensure_excel(excel_path: String, field_keys: Option<Vec<String>>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_excel_blocking(excel_path, field_keys)).await.map_err(|error| format!("Excel task failed: {error}"))?
 }
 
-fn ensure_excel_blocking(excel_path: String) -> Result<Value, String> {
+fn ensure_excel_blocking(excel_path: String, field_keys: Option<Vec<String>>) -> Result<Value, String> {
     if excel_path.trim().is_empty() {
         return Err("No Excel target selected.".to_string());
     }
 
-    run_sidecar(&["--ensure-excel", &excel_path])
+    if let Some(keys) = field_keys {
+        let keys_json = serde_json::to_string(&keys).map_err(|error| format!("Failed to serialize Excel fields: {error}"))?;
+        run_sidecar(&["--ensure-excel-fields", &excel_path, &keys_json])
+    } else {
+        run_sidecar(&["--ensure-excel", &excel_path])
+    }
 }
 
 #[tauri::command]
