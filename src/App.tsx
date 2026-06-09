@@ -6,6 +6,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Activity,
+  FileSpreadsheet,
   FileText,
   History,
   Menu,
@@ -20,22 +21,14 @@ import {
 import { useEffect, useState } from "react";
 import logoUrl from "./assets/urice_logo.ico";
 import { BrandScene } from "./components/BrandScene";
+import { defaultAppSettings, normalizeAppSettings, type AppSettings } from "./config/appSettings";
 import { defaultExtractionFields, extractionFieldOptions, type ExtractionFieldKey } from "./config/extractionFields";
 import { ToolCard } from "./components/ToolCard";
+import { ExcelMerger } from "./modules/excel-merger/ExcelMerger";
 import { PoPdfManager } from "./modules/po-pdf-manager/PoPdfManager";
 
-type ViewName = "po" | "history" | "settings";
-type ThemeMode = "dark" | "light";
+type ViewName = "po" | "merger" | "history" | "settings";
 type UpdatePhase = "idle" | "checking" | "available" | "downloading" | "installing" | "restarting" | "error";
-
-export type AppSettings = {
-  excelPath: string;
-  processedOutputFolder: string;
-  sourceArchiveFolder: string;
-  themeMode: ThemeMode;
-  selectedExtractionFields: ExtractionFieldKey[];
-  batchConcurrency: number;
-};
 
 export type HistoryEntry = {
   time: string;
@@ -62,10 +55,17 @@ const tools = [
     status: "Enabled",
     icon: RefreshCw,
   },
+  {
+    title: "Excel Merger",
+    description: "Normalize SAP, PB, PI, and COM Excel exports through reusable column mapping.",
+    status: "V1.1.0 Foundation",
+    icon: FileSpreadsheet,
+  },
 ];
 
 const navItems = [
   { view: "po" as const, label: "PO Manager", icon: FileText },
+  { view: "merger" as const, label: "Excel Merger", icon: FileSpreadsheet },
   { view: "history" as const, label: "History", icon: Activity },
   { view: "settings" as const, label: "Settings", icon: Settings },
 ];
@@ -94,21 +94,16 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewName>("po");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [appVersion, setAppVersion] = useState<string>("0.1.0");
+  const [appVersion, setAppVersion] = useState<string>("loading...");
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState("Loading local settings...");
   const [updateStatus, setUpdateStatus] = useState<string>("Auto checker will run when the app starts.");
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateDownloaded, setUpdateDownloaded] = useState(0);
   const [updateTotal, setUpdateTotal] = useState<number | null>(null);
   const [updateTargetVersion, setUpdateTargetVersion] = useState<string>("");
-  const [settings, setSettings] = useState<AppSettings>({
-    excelPath: "",
-    processedOutputFolder: "",
-    sourceArchiveFolder: "",
-    themeMode: "dark",
-    selectedExtractionFields: defaultExtractionFields,
-    batchConcurrency: 2,
-  });
+  const [settings, setSettings] = useState<AppSettings>(defaultAppSettings);
 
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings((current) => ({ ...current, ...patch }));
@@ -197,8 +192,36 @@ export function App() {
 
   useEffect(() => {
     void checkForUpdates(false);
-    getVersion().then(setAppVersion).catch(() => undefined);
+    invoke<string>("app_version")
+      .then(setAppVersion)
+      .catch(() => getVersion().then(setAppVersion).catch(() => setAppVersion("unknown")));
   }, []);
+
+  useEffect(() => {
+    invoke<{ ok: boolean; settings: unknown; path: string }>("load_app_settings")
+      .then((result) => {
+        if (result.settings) {
+          setSettings(normalizeAppSettings(result.settings));
+          setSettingsStatus(`Settings loaded from ${result.path}`);
+        } else {
+          setSettingsStatus("No saved settings yet. Changes will be saved automatically.");
+        }
+      })
+      .catch((error) => {
+        setSettingsStatus(`Settings load failed: ${String(error)}`);
+      })
+      .finally(() => setSettingsLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const handle = window.setTimeout(() => {
+      invoke("save_app_settings", { settings })
+        .then(() => setSettingsStatus("Settings saved automatically."))
+        .catch((error) => setSettingsStatus(`Settings save failed: ${String(error)}`));
+    }, 450);
+    return () => window.clearTimeout(handle);
+  }, [settings, settingsLoaded]);
 
   async function selectExcelTarget() {
     const picked = await save({
@@ -285,7 +308,7 @@ export function App() {
           </div>
         </header>
 
-        {activeView === "po" && (
+        {(activeView === "po" || activeView === "merger") && (
           <>
             <header className="hero-band">
               <div className="hero-copy">
@@ -309,6 +332,10 @@ export function App() {
 
         <div hidden={activeView !== "po"}>
           <PoPdfManager settings={settings} updateSettings={updateSettings} addHistory={addHistory} />
+        </div>
+
+        <div hidden={activeView !== "merger"}>
+          <ExcelMerger settings={settings} addHistory={addHistory} />
         </div>
 
         {activeView === "history" && (
@@ -335,6 +362,10 @@ export function App() {
               <label>
                 Application Version
                 <input value={`URice Tools Client v${appVersion}`} readOnly />
+              </label>
+              <label>
+                Local Settings
+                <input value={settingsStatus} readOnly />
               </label>
               <div className="settings-card update-card">
                 <div>

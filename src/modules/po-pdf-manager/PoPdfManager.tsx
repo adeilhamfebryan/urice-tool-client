@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, FileUp, Loader2, Play, Save, Table2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { AppSettings } from "../../App";
+import type { AppSettings } from "../../config/appSettings";
 import { extractionFieldOptions, type ExtractionFieldKey } from "../../config/extractionFields";
 
 type HealthResponse = {

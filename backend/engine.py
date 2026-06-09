@@ -60,7 +60,31 @@ TEXT_COLUMNS = {
     "Nomor OP",
     "Nomor Vendor",
     "Nomor Item",
+    "Nomor PO",
+    "Nomor PR",
+    "Nomor GR",
+    "Vendor Code",
+    "Material Code",
 }
+
+MERGER_STANDARD_COLUMNS = [
+    "Source",
+    "Nomor PO",
+    "Nomor PR",
+    "Nomor GR",
+    "Vendor Code",
+    "Vendor Name",
+    "Material Code",
+    "Nama Barang",
+    "Qty",
+    "Satuan",
+    "Harga Satuan",
+    "Total",
+    "Tanggal",
+    "Plant",
+    "Status",
+    "Keterangan",
+]
 
 
 def _excel_text(value: object) -> str:
@@ -329,6 +353,149 @@ def append_record_file(excel_path: str, record_file: str) -> dict:
     payload = Path(record_file).read_text(encoding="utf-8-sig")
     return append_record(excel_path, payload)
 
+
+def _sheet_headers(ws) -> list[str]:
+    if ws.max_row < 1:
+        return []
+    headers = []
+    for cell in ws[1]:
+        text = str(cell.value or "").strip()
+        if text:
+            headers.append(text)
+    return headers
+
+
+def inspect_excel_headers(excel_path: str) -> dict:
+    path = Path(excel_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        headers = _sheet_headers(ws)
+        return {
+            "ok": True,
+            "path": str(path),
+            "sheet": ws.title,
+            "headers": headers,
+            "row_count": max(ws.max_row - 1, 0),
+        }
+    finally:
+        wb.close()
+
+
+def _merger_headers_for_sources(sources: list[dict]) -> list[str]:
+    selected_targets = set()
+    for source in sources:
+        mapping = source.get("mapping") or {}
+        if not isinstance(mapping, dict):
+            continue
+        for target in mapping.values():
+            target_text = str(target or "").strip()
+            if target_text and target_text in MERGER_STANDARD_COLUMNS:
+                selected_targets.add(target_text)
+    return [header for header in MERGER_STANDARD_COLUMNS if header == "Source" or header in selected_targets]
+
+
+def _normalize_excel_value(header: str, value: object) -> object:
+    if value is None:
+        return ""
+    if header in TEXT_COLUMNS:
+        return _excel_text(value)
+    return value
+
+
+def _style_merger_sheet(ws, headers: list[str]) -> None:
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="630D16", end_color="630D16", fill_type="solid")
+    thin_border = Border(
+        left=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),
+        bottom=Side(style="thin", color="CCCCCC"),
+    )
+    for index, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=index)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(index)].width = 22 if header != "Nama Barang" else 42
+        if header in TEXT_COLUMNS:
+            ws.column_dimensions[get_column_letter(index)].number_format = "@"
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            if headers[cell.column - 1] in TEXT_COLUMNS:
+                cell.number_format = "@"
+
+
+def merge_excel_files(output_path: str, sources: list[dict]) -> dict:
+    if not sources:
+        raise ValueError("At least one Excel source is required.")
+
+    output = Path(output_path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    headers = _merger_headers_for_sources(sources)
+    if headers == ["Source"]:
+        headers = MERGER_STANDARD_COLUMNS.copy()
+
+    out_wb = openpyxl.Workbook()
+    out_ws = out_wb.active
+    out_ws.title = "Merged Data"
+    out_ws.append(headers)
+
+    row_count = 0
+    source_summaries = []
+    for source in sources:
+        source_path = Path(str(source.get("path", ""))).expanduser().resolve()
+        source_name = str(source.get("source_name") or source_path.stem or "Source")
+        mapping = source.get("mapping") or {}
+        if not source_path.exists():
+            source_summaries.append({"source_name": source_name, "path": str(source_path), "ok": False, "error": "File not found"})
+            continue
+        if not isinstance(mapping, dict):
+            source_summaries.append({"source_name": source_name, "path": str(source_path), "ok": False, "error": "Mapping must be an object"})
+            continue
+
+        wb = openpyxl.load_workbook(source_path, read_only=True, data_only=True)
+        source_rows = 0
+        try:
+            ws = wb.active
+            source_headers = _sheet_headers(ws)
+            header_indexes = {header: index for index, header in enumerate(source_headers)}
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or all(value is None or str(value).strip() == "" for value in row):
+                    continue
+                output_row = []
+                for target_header in headers:
+                    if target_header == "Source":
+                        output_row.append(source_name)
+                        continue
+                    source_header = next((src for src, target in mapping.items() if str(target).strip() == target_header), "")
+                    value = row[header_indexes[source_header]] if source_header in header_indexes and header_indexes[source_header] < len(row) else ""
+                    output_row.append(_normalize_excel_value(target_header, value))
+                out_ws.append(output_row)
+                row_count += 1
+                source_rows += 1
+        finally:
+            wb.close()
+        source_summaries.append({"source_name": source_name, "path": str(source_path), "ok": True, "row_count": source_rows})
+
+    _style_merger_sheet(out_ws, headers)
+    out_ws.freeze_panes = "A2"
+    out_wb.save(output)
+    out_wb.close()
+    return {
+        "ok": True,
+        "output_path": str(output),
+        "headers": headers,
+        "row_count": row_count,
+        "sources": source_summaries,
+    }
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="URice Tools Client sidecar")
     parser.add_argument("--health", action="store_true", help="Print backend health as JSON")
@@ -338,6 +505,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ensure-excel-fields", nargs=2, metavar=("XLSX", "FIELDS_JSON"), help="Create or prepare target Excel with selected fields")
     parser.add_argument("--append-record", nargs=2, metavar=("XLSX", "JSON"), help="Append one corrected PO record to Excel")
     parser.add_argument("--append-record-file", nargs=2, metavar=("XLSX", "JSON_FILE"), help="Append one corrected PO record from a JSON file")
+    parser.add_argument("--inspect-excel", metavar="XLSX", help="Read first-row headers from an Excel workbook")
+    parser.add_argument("--merge-excel-file", nargs=2, metavar=("OUTPUT_XLSX", "SOURCES_JSON_FILE"), help="Merge Excel sources from a JSON file")
     args = parser.parse_args(argv)
 
     try:
@@ -358,6 +527,11 @@ def main(argv: list[str] | None = None) -> int:
             payload = append_record(args.append_record[0], args.append_record[1])
         elif args.append_record_file:
             payload = append_record_file(args.append_record_file[0], args.append_record_file[1])
+        elif args.inspect_excel:
+            payload = inspect_excel_headers(args.inspect_excel)
+        elif args.merge_excel_file:
+            sources = json.loads(Path(args.merge_excel_file[1]).read_text(encoding="utf-8-sig"))
+            payload = merge_excel_files(args.merge_excel_file[0], sources)
         else:
             payload = {"ok": False, "error": "No command provided"}
             print(json.dumps(payload), file=sys.stderr)

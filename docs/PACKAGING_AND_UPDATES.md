@@ -42,6 +42,7 @@ Use Tauri updater with GitHub Releases. Production release work must include:
 - 2026-06-09 20:59:37 WIB - The project now uses the newly generated updater key pair `urice.key` / `urice.key.pub`. The GitHub Actions private key secret remains `ANAK`, the password secret remains `YATIM`, and the app public key in `tauri.conf.json` must match `urice.key.pub`.
 - 2026-06-09 21:32:21 WIB - Local release builds now read the updater key password from `src-tauri/keys/secret.txt` when that ignored file exists. Keep this file local only and ensure it matches the password stored in GitHub Actions secret `YATIM`.
 - 2026-06-09 22:14:44 WIB - Version 0.1.5 adds visible updater progress for check/download/install/restart phases. If the installed app still shows the old version after update, confirm the progress reaches the restart phase and that Windows allows the passive NSIS updater to replace the installed app.
+- 2026-06-09 23:30:23 WIB - Version 1.1.0 reads the displayed application version from the Tauri backend command `app_version`, which uses the packaged Cargo version. This removes the old frontend fallback that could keep showing `URice Tools Client v0.1.0` after an update.
 - The updater signing private key must be stored in GitHub Actions Secrets, not in the repository. This repository expects the private key secret name `ANAK` and the key password secret name `YATIM`.
 - The public updater key is stored in `src-tauri/tauri.conf.json`.
 - Release builds are produced by `.github/workflows/release.yml`.
@@ -81,3 +82,7 @@ The current updater key is for local development only. Before public/internal pr
 ## Batch Processing Notes
 
 - 2026-06-09 22:14:44 WIB - Batch OCR may run with limited parallel workers. Recommended default is 2 workers because each PDF can start OCR/PDF processing sidecar work; higher values can be faster but may increase CPU, RAM, and disk pressure on office laptops. Excel writing remains sequential after preview confirmation to avoid workbook corruption.
+
+## Excel Merger Notes
+
+- 2026-06-09 23:30:23 WIB - Excel Merger 1.1.0 starts with custom column mapping instead of hardcoded SAP/PB/PI/COM formats. Users can load workbooks, map source headers into URice standard columns, and export a normalized workbook. Real user sample files will be used later to improve automatic template detection.

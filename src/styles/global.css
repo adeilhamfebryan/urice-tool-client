@@ -434,7 +434,8 @@ p { color: #b8b3aa; line-height: 1.55; }
 
 .correction-grid input,
 .settings-grid input,
-.settings-grid select {
+.settings-grid select,
+.merger-source-card select {
   width: 100%;
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 8px;
@@ -530,6 +531,55 @@ p { color: #b8b3aa; line-height: 1.55; }
   padding: 8px 12px;
 }
 
+.merger-source-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.merger-source-card {
+  grid-column: 1 / -1;
+}
+
+.merger-source-card label {
+  display: grid;
+  gap: 7px;
+  color: #f4d27a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mapping-grid label {
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.035);
+}
+
+.mapping-grid span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #f7f4ed;
+}
+
+.empty-merger-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 140px;
+  padding: 18px;
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 8px;
+  color: #cfc8bb;
+  background: rgba(255,255,255,0.035);
+}
+
 .update-card p,
 .update-bytes {
   margin: 0;
@@ -615,6 +665,7 @@ p { color: #b8b3aa; line-height: 1.55; }
 .theme-light .correction-grid input,
 .theme-light .settings-grid input,
 .theme-light .settings-grid select,
+.theme-light .merger-source-card select,
 .theme-light .editable-preview-table input {
   color: #1c1c1e;
   background: #ffffff;
@@ -646,6 +697,17 @@ p { color: #b8b3aa; line-height: 1.55; }
 
 .theme-light .checkbox-row small {
   color: #5c5c62;
+}
+
+.theme-light .mapping-grid label,
+.theme-light .empty-merger-state {
+  color: #4b4b4f;
+  background: rgba(99,13,22,0.03);
+  border-color: rgba(99,13,22,0.10);
+}
+
+.theme-light .mapping-grid span {
+  color: #1c1c1e;
 }
 
 .theme-light .update-card p,
@@ -694,7 +756,8 @@ p { color: #b8b3aa; line-height: 1.55; }
   .workflow-steps,
   .correction-grid,
   .settings-grid,
-  .field-picker-list {
+  .field-picker-list,
+  .mapping-grid {
     grid-template-columns: 1fr;
   }
 }

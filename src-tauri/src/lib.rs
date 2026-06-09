@@ -2,9 +2,10 @@ use serde::Serialize;
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
+use tauri::Manager;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -113,6 +114,62 @@ fn process_pdf_blocking(path: String, output_folder: String, source_archive_fold
     }
 
     run_sidecar(&["--process", &path, &output_folder, &source_archive_folder])
+}
+
+fn app_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+    fs::create_dir_all(&dir).map_err(|error| format!("Failed to create app data directory {}: {error}", dir.display()))?;
+    Ok(dir.join("settings.json"))
+}
+
+#[tauri::command]
+async fn app_version() -> Result<String, String> {
+    Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+#[tauri::command]
+async fn load_app_settings(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app_settings_path(&app)?;
+        if !path.exists() {
+            return Ok(serde_json::json!({
+                "ok": true,
+                "settings": null,
+                "path": path.to_string_lossy()
+            }));
+        }
+        let content = fs::read_to_string(&path)
+            .map_err(|error| format!("Failed to read settings file {}: {error}", path.display()))?;
+        let settings = serde_json::from_str::<Value>(&content)
+            .map_err(|error| format!("Settings file contains invalid JSON: {error}"))?;
+        Ok(serde_json::json!({
+            "ok": true,
+            "settings": settings,
+            "path": path.to_string_lossy()
+        }))
+    })
+    .await
+    .map_err(|error| format!("Load settings task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn save_app_settings(app: tauri::AppHandle, settings: Value) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app_settings_path(&app)?;
+        let content = serde_json::to_string_pretty(&settings)
+            .map_err(|error| format!("Failed to serialize settings: {error}"))?;
+        fs::write(&path, content)
+            .map_err(|error| format!("Failed to write settings file {}: {error}", path.display()))?;
+        Ok(serde_json::json!({
+            "ok": true,
+            "path": path.to_string_lossy()
+        }))
+    })
+    .await
+    .map_err(|error| format!("Save settings task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -352,6 +409,48 @@ fn append_excel_record_blocking(excel_path: String, record_json: String) -> Resu
     result
 }
 
+#[tauri::command]
+async fn inspect_excel_headers(path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_excel_headers_blocking(path)).await.map_err(|error| format!("Inspect Excel task failed: {error}"))?
+}
+
+fn inspect_excel_headers_blocking(path: String) -> Result<Value, String> {
+    if path.trim().is_empty() {
+        return Err("No Excel path selected.".to_string());
+    }
+
+    run_sidecar(&["--inspect-excel", &path])
+}
+
+#[tauri::command]
+async fn merge_excel_sources(output_path: String, sources: Vec<Value>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || merge_excel_sources_blocking(output_path, sources)).await.map_err(|error| format!("Merge Excel task failed: {error}"))?
+}
+
+fn merge_excel_sources_blocking(output_path: String, sources: Vec<Value>) -> Result<Value, String> {
+    if output_path.trim().is_empty() {
+        return Err("No Excel output path selected.".to_string());
+    }
+    if sources.is_empty() {
+        return Err("No Excel source selected.".to_string());
+    }
+
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("System clock error: {error}"))?
+        .as_millis();
+    let temp_path = std::env::temp_dir().join(format!("urice-excel-merge-{millis}.json"));
+    let content = serde_json::to_string(&sources).map_err(|error| format!("Failed to serialize merge sources: {error}"))?;
+    fs::write(&temp_path, content).map_err(|error| {
+        format!("Failed to write temporary merge source file {}: {error}", temp_path.display())
+    })?;
+
+    let temp_path_string = temp_path.to_string_lossy().to_string();
+    let result = run_sidecar(&["--merge-excel-file", &output_path, &temp_path_string]);
+    let _ = fs::remove_file(&temp_path);
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -361,7 +460,21 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![engine_health, extract_pdf, process_pdf, process_batch, list_pdf_files, move_sources_to_archive, ensure_excel, append_excel_record])
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            load_app_settings,
+            save_app_settings,
+            engine_health,
+            extract_pdf,
+            process_pdf,
+            process_batch,
+            list_pdf_files,
+            move_sources_to_archive,
+            ensure_excel,
+            append_excel_record,
+            inspect_excel_headers,
+            merge_excel_sources
+        ])
         .run(tauri::generate_context!())
         .expect("error while running URice Tools Client");
 }
