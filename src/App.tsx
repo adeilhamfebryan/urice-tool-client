@@ -312,10 +312,6 @@ export function App() {
           >
             <Menu size={18} />
           </button>
-          <div>
-            <p className="eyebrow"><Sparkles size={14} /> URice Corporation</p>
-            <strong>{navItems.find((item) => item.view === activeView)?.label}</strong>
-          </div>
         </header>
 
         {activeView === "dashboard" && (

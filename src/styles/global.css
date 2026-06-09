@@ -363,7 +363,8 @@ p { color: #b8b3aa; line-height: 1.55; }
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
 .mobile-sidebar-button { display: none; }
@@ -700,6 +701,20 @@ p { color: #b8b3aa; line-height: 1.55; }
   background: #f5f5f7;
 }
 
+.theme-light .hero-band {
+  background: linear-gradient(135deg, rgba(99,13,22,0.88), rgba(24,24,30,0.96));
+}
+
+.theme-light .hero-band h2,
+.theme-light .hero-band p,
+.theme-light .hero-band .eyebrow {
+  color: #fff7ec;
+}
+
+.theme-light .hero-band p {
+  color: rgba(255,247,236,0.78);
+}
+
 .theme-light .work-panel,
 .theme-light .tool-card,
 .theme-light .history-item,
@@ -713,7 +728,7 @@ p { color: #b8b3aa; line-height: 1.55; }
 .theme-light .status-line,
 .theme-light .selected-paths,
 .theme-light .preview-table td {
-  color: #4b4b4f;
+  color: #323238;
 }
 
 .theme-light .correction-grid input,
@@ -777,8 +792,8 @@ p { color: #b8b3aa; line-height: 1.55; }
 .preview-table-wrap::-webkit-scrollbar,
 .realtime-log::-webkit-scrollbar,
 .field-picker-list::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 2.5px;
+  height: 2.5px;
 }
 
 .workspace::-webkit-scrollbar-track,
@@ -792,7 +807,7 @@ p { color: #b8b3aa; line-height: 1.55; }
 .preview-table-wrap::-webkit-scrollbar-thumb,
 .realtime-log::-webkit-scrollbar-thumb,
 .field-picker-list::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
+  border: 0;
   border-radius: 999px;
   background: linear-gradient(180deg, #d9a441, #630d16) border-box;
 }
