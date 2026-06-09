@@ -62,12 +62,22 @@ jobs:
             --add-data "$env:TESSERACT_PORTABLE_DIR;tesseract_portable" `
             "backend\engine.py"
 
+      - name: Load updater signing secrets
+        shell: powershell
+        run: |
+          $key = @'
+          ${{ secrets.ANAK }}
+          '@
+          $key = $key.Trim().Trim([char]0xFEFF)
+          "TAURI_SIGNING_PRIVATE_KEY<<__TAURI_KEY__" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $key | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "__TAURI_KEY__" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.YATIM }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.ANAK }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.YATIM }}
         with:
           tagName: v__VERSION__
           releaseName: "URice Tools Client v__VERSION__"

@@ -35,6 +35,7 @@ Use Tauri updater with GitHub Releases. Production release work must include:
 ## GitHub Releases Auto Updater
 
 - 2026-06-09 07:33:00 WIB - Auto updater distribution is configured to use GitHub Releases at `https://github.com/adeilhamfebryan/urice-tool-client/releases/latest/download/latest.json`.
+- 2026-06-09 13:24:28 WIB - Release workflow signing secrets are loaded through `$GITHUB_ENV` before `tauri-action` runs, so multiline updater private keys stored in GitHub Actions Secrets are passed to Tauri more reliably.
 - The updater signing private key must be stored in GitHub Actions Secrets, not in the repository. This repository expects the private key secret name `ANAK` and the key password secret name `YATIM`.
 - The public updater key is stored in `src-tauri/tauri.conf.json`.
 - Release builds are produced by `.github/workflows/release.yml`.
