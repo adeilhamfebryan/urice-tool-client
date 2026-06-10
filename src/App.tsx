@@ -6,7 +6,6 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Activity,
-  FileSpreadsheet,
   FileText,
   History,
   Menu,
@@ -24,10 +23,9 @@ import { BrandScene } from "./components/BrandScene";
 import { defaultAppSettings, normalizeAppSettings, type AppSettings } from "./config/appSettings";
 import { defaultExtractionFields, extractionFieldOptions, type ExtractionFieldKey } from "./config/extractionFields";
 import { ToolCard } from "./components/ToolCard";
-import { ExcelMerger } from "./modules/excel-merger/ExcelMerger";
 import { PoPdfManager } from "./modules/po-pdf-manager/PoPdfManager";
 
-type ViewName = "dashboard" | "po" | "merger" | "history" | "settings";
+type ViewName = "dashboard" | "po" | "history" | "settings";
 type UpdatePhase = "idle" | "checking" | "available" | "downloading" | "installing" | "restarting" | "error";
 
 export type HistoryEntry = {
@@ -40,7 +38,6 @@ export type HistoryEntry = {
 const navItems = [
   { view: "dashboard" as const, label: "Dashboard", icon: Sparkles },
   { view: "po" as const, label: "PO Manager", icon: FileText },
-  { view: "merger" as const, label: "Excel Merger", icon: FileSpreadsheet },
   { view: "history" as const, label: "History", icon: Activity },
   { view: "settings" as const, label: "Settings", icon: Settings },
 ];
@@ -250,13 +247,6 @@ export function App() {
       icon: RefreshCw,
       view: "settings" as const,
     },
-    {
-      title: "Excel Merger",
-      description: "Normalize many excel column format to your format.",
-      status: "Requested by Commercial Division CPI Lampung",
-      icon: FileSpreadsheet,
-      view: "merger" as const,
-    },
   ];
 
   function historyTagClass(tool: string) {
@@ -338,10 +328,6 @@ export function App() {
 
         <div hidden={activeView !== "po"}>
           <PoPdfManager settings={settings} updateSettings={updateSettings} addHistory={(action, detail) => addHistory(action, detail, "PO Manager")} />
-        </div>
-
-        <div hidden={activeView !== "merger"}>
-          <ExcelMerger settings={settings} addHistory={(action, detail) => addHistory(action, detail, "Excel Merger")} />
         </div>
 
         {activeView === "history" && (

@@ -29,6 +29,65 @@ except ImportError:
 from ..models.po_data import POExtractionResult, POItem
 
 
+CONTACT_NUMBER_CONTEXT = re.compile(r'\b(?:TELP|TELEPON|PHONE|FAX|HP|HANDPHONE|MOBILE|CONTACT|KONTAK|PIC)\b', re.IGNORECASE)
+
+
+def _has_po_number_label(line: str) -> bool:
+    label = re.sub(r'[^A-Z]', '', line.upper().replace("0", "O"))
+    return any(token in label for token in ("NOOP", "OPNO", "PONO", "PONUMBER", "PURCHASEORDERNO"))
+
+
+def _numbers_from_line(line: str) -> list[str]:
+    return re.findall(r'\b\d{7,14}\b', line)
+
+
+def _number_after_po_label(line: str) -> str:
+    patterns = [
+        r'No\.?\s*OP\s*[:>\-\.]?\s*(\d{7,14})',
+        r'OP\s*No\.?\s*[:>\-\.]?\s*(\d{7,14})',
+        r'PO\s*No\.?\s*[:>\-\.]?\s*(\d{7,14})',
+        r'P\s*[O0]\s*N\s*[O0]\.?\s*[:>\-\.]?\s*(\d{7,14})',
+        r'PO\s*Number\s*[:>\-\.]?\s*(\d{7,14})',
+        r'Purchase\s*Order\s*No\.?\s*[:>\-\.]?\s*(\d{7,14})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _extract_document_number(lines: list[str], full_text: str, filename: str) -> str:
+    unique_lines = list(dict.fromkeys([line.strip() for line in lines if line.strip()]))
+
+    for line in unique_lines:
+        if _has_po_number_label(line):
+            labeled_number = _number_after_po_label(line)
+            if labeled_number:
+                return labeled_number
+            for number in _numbers_from_line(line):
+                return number
+
+    labeled_number = _number_after_po_label(full_text)
+    if labeled_number:
+        return labeled_number
+
+    safe_generic_patterns = [
+        r'\b(09\d{10})\b',
+        r'\b(1871\d{6,})\b',
+        r'\b(18\d{8,10})\b',
+        r'\b(0\d{11})\b',
+    ]
+    for pattern in safe_generic_patterns:
+        for match in re.finditer(pattern, full_text, re.IGNORECASE):
+            context = full_text[max(0, match.start() - 50): match.end() + 50]
+            if not CONTACT_NUMBER_CONTEXT.search(context):
+                return match.group(1)
+
+    filename_match = re.search(r'(\d{9,12})', filename or "")
+    return filename_match.group(1) if filename_match else ""
+
+
 def get_tesseract_paths() -> dict:
     """Returns possible Tesseract locations (development + installed + bundled)."""
     paths = {}
@@ -174,24 +233,8 @@ class POExtractor:
             except Exception as e:
                 self.log(f"Position filter failed, using full text: {str(e)[:80]}", "WARNING")
 
-        # NO. OP
-        op_patterns = [
-            r'No\.?\s*OP\s*[:>]\s*(\d{7,12})',
-            r'PO\s*No\.?\s*[: ]\s*(\d{7,12})',
-            r'\b(09\d{10})\b',
-            r'1871\d{6,}',
-            r'\b(18\d{8,10})\b',
-            r'\b(0\d{11})\b',
-        ]
-        for pat in op_patterns:
-            m = re.search(pat, original_full_text, re.IGNORECASE)
-            if m:
-                result.no_op = m.group(1) if m.lastindex else m.group(0)
-                break
-        if not result.no_op:
-            m = re.search(r'(\d{9,12})', original_filename or "")
-            if m:
-                result.no_op = m.group(1)
+        # NO. OP / PO No.
+        result.no_op = _extract_document_number(source_lines + lines, original_full_text, original_filename)
 
 
         # VENDOR
