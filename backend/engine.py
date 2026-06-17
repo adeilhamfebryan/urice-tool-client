@@ -128,6 +128,18 @@ def _extract_rows(path: Path) -> list[dict]:
 def _extract_company_name(text: str) -> str:
     lines = [" ".join(line.strip().split()) for line in text.splitlines() if line.strip()]
     joined = " ".join(lines)
+    for line in lines[:12]:
+        if not re.match(r"^PT\.?\s*", line, re.IGNORECASE):
+            continue
+        candidate = re.split(r"\bPage\s+\d+\s+of\s+\d+\b", line, flags=re.IGNORECASE)[0]
+        candidate = re.sub(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b.*$", "", candidate)
+        candidate = re.sub(r"(?<=[A-Za-z]):(?=[A-Za-z])", " ", candidate)
+        candidate = re.sub(r"[^A-Za-z0-9\.\,\-\s]", " ", candidate)
+        candidate = " ".join(candidate.strip(" -:,").split())
+        candidate = re.sub(r"\s+[A-Za-z]{1,2}\s+[A-Za-z]{1,2}$", "", candidate).strip()
+        if len(candidate) >= 6 and not any(skip in candidate.upper() for skip in ["ALAMAT", "NPWP", "PHONE", "FAX", "BANK"]):
+            return candidate[:80]
+
     known_patterns = [
         r"(PT\.?\s+CHAROEN\s+POKPHAND\s+INDONESIA(?:\s+Tbk\.?)?)",
         r"(CHAROEN\s+POKPHAND\s+INDONESIA(?:\s+Tbk\.?)?)",

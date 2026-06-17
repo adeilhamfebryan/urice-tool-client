@@ -88,6 +88,20 @@ def _extract_document_number(lines: list[str], full_text: str, filename: str) ->
     return filename_match.group(1) if filename_match else ""
 
 
+def _clean_vendor_name(value: str) -> str:
+    cleaned = value.strip(" |:;-'\"")
+    cleaned = re.sub(r'\s*[\(\[].*$', '', cleaned).strip().strip(',').strip()
+    return ' '.join(cleaned.split())
+
+
+def _normalize_legal_vendor_name(value: str) -> str:
+    cleaned = _clean_vendor_name(value)
+    match = re.match(r'^PT\.?\s+(.+)$', cleaned, re.IGNORECASE)
+    if match:
+        return f"{match.group(1).strip().upper()}, PT."
+    return cleaned
+
+
 def get_tesseract_paths() -> dict:
     """Returns possible Tesseract locations (development + installed + bundled)."""
     paths = {}
@@ -238,15 +252,21 @@ class POExtractor:
 
 
         # VENDOR
-        bad_vendor_kw = ["SINAR TERNAK", "CHAROEN", "DELIVERY", "BILLING", "PHONE", "TELP", "FAX", "CONTACT", "BANK", "ATTENTION", "PIC ", "NPWP", "NITKU", "ORG.", "PLANT", "GROUP PEMBELIAN", "MATA UANG", "ALAMAT", "INFORMASI", "SALES PERSON", "SHIPPING"]
+        bad_vendor_kw = ["SINAR TERNAK", "CHAROEN", "DELIVERY", "BILLING", "PHONE", "TELP", "FAX", "CONTACT", "BANK", "ATTENTION", "PIC ", "NPWP", "NITKU", "ORG.", "PLANT", "GROUP PEMBELIAN", "MATA UANG", "ALAMAT", "INFORMASI", "SALES PERSON", "SHIPPING", "PO DATE", "ESTIMATE DATE", "PAYMENT TERM", "CURRENCY", "TOLERANCE", "INCOTERM", "PLUIT", "PLOEIT", "JL.", "JALAN", "OFFICE BUILDING", "LANTAI", "JAKARTA", "KEL.", "KEC.", "RAYA BLOK"]
         candidates = []
         supplier_lines = list(dict.fromkeys([l.strip() for l in source_lines + lines if l.strip()]))
 
         for idx, line in enumerate(supplier_lines):
             next_line = supplier_lines[idx + 1] if idx + 1 < len(supplier_lines) else ""
+            m = re.search(r'(.+?)\s*[-â€“]\s*\|?\s*PO\s*Date\b', line, re.IGNORECASE)
+            if m:
+                name_part = _clean_vendor_name(m.group(1))
+                if len(name_part) >= 4 and not any(b in name_part.upper() for b in bad_vendor_kw):
+                    candidates.append((name_part, "", 45))
+
             m = re.search(r'(.+?)\s*[-â€“]\s*(?:No\.?\s*OP|PO\s*Date)\b', line, re.IGNORECASE)
             if m:
-                name_part = m.group(1).strip(" |:;-'\"")
+                name_part = _clean_vendor_name(m.group(1))
                 code_match = re.search(r'\b(0{2,}\d{5,10}|\d{6,10})\b', next_line)
                 code_part = code_match.group(1) if code_match else ""
                 if name_part and code_part:
@@ -258,15 +278,15 @@ class POExtractor:
 
             m = re.search(r'Transfer\s*info\s*[-—:]?\s*(PT\.?\s+[A-Za-z0-9\.\,\s\(\)\-]+?)(?:\s+Payment|\s+Incoterm|\s+Bank|$)', line, re.IGNORECASE)
             if m:
-                candidates.append((m.group(1).strip(), "", 25))
+                candidates.append((_normalize_legal_vendor_name(m.group(1)), "", 44))
 
         for line in supplier_lines:
             for m in re.finditer(r'([A-Z][A-Za-z0-9\.\,\s\(\)\-]+?)\s*[-â€“]\s*(\d{5,10})(?:\s|$|[^0-9])', line):
                 name_part = m.group(1).strip().strip('-â€“').strip()
                 code_part = m.group(2).strip()
+                name_part = _clean_vendor_name(name_part)
                 nu = name_part.upper()
                 if len(name_part) >= 4 and not any(b in nu for b in bad_vendor_kw) and not name_part.replace(' ', '').replace('-', '').isdigit():
-                    name_part = re.sub(r'\s*[\(\[].*$', '', name_part).strip().strip(',').strip()
                     if len(name_part) >= 4:
                         candidates.append((name_part, code_part, 12))
 
