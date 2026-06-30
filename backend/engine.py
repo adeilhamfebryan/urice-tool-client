@@ -205,22 +205,35 @@ def process_pdf(pdf_path: str, output_folder: str, source_archive_folder: str = 
     if not rows:
         return {"ok": False, "error": "No extraction rows were produced.", "source": str(path), "rows": []}
 
-    first = rows[0]
+    return {
+        "ok": True,
+        "source": str(path),
+        "processed_pdf_path": "",
+        "processed_pdf_filename": "",
+        "archived_source_path": "",
+        "company_name": company_name,
+        "rows": rows,
+    }
+
+
+def save_processed_pdf(pdf_path: str, output_folder: str, vendor_name: str, no_op: str) -> dict:
+    path = Path(pdf_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    if not str(output_folder or "").strip():
+        raise ValueError("No processed PDF output folder selected.")
+
     processed_path, processed_filename = _save_first_page(
         path,
         Path(output_folder).expanduser().resolve(),
-        first.get("vendor_name", "VENDOR"),
-        first.get("no_op", ""),
+        vendor_name or "VENDOR",
+        no_op or "",
     )
-
     return {
         "ok": True,
         "source": str(path),
         "processed_pdf_path": processed_path,
         "processed_pdf_filename": processed_filename,
-        "archived_source_path": "",
-        "company_name": company_name,
-        "rows": rows,
     }
 
 
@@ -512,7 +525,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="URice Tools Client sidecar")
     parser.add_argument("--health", action="store_true", help="Print backend health as JSON")
     parser.add_argument("--extract", metavar="PDF", help="Extract PO data from a PDF and print JSON")
-    parser.add_argument("--process", nargs=3, metavar=("PDF", "OUTPUT_FOLDER", "SOURCE_ARCHIVE"), help="Extract PDF and save the first page. Source archive move is handled after Excel apply.")
+    parser.add_argument("--process", nargs=3, metavar=("PDF", "OUTPUT_FOLDER", "SOURCE_ARCHIVE"), help="Extract PDF data for preview. First-page PDF save is handled after preview apply.")
+    parser.add_argument("--save-processed-pdf", nargs=4, metavar=("PDF", "OUTPUT_FOLDER", "VENDOR", "NO_OP"), help="Save first page PDF using corrected preview data")
     parser.add_argument("--ensure-excel", metavar="XLSX", help="Create target Excel if it does not exist")
     parser.add_argument("--ensure-excel-fields", nargs=2, metavar=("XLSX", "FIELDS_JSON"), help="Create or prepare target Excel with selected fields")
     parser.add_argument("--append-record", nargs=2, metavar=("XLSX", "JSON"), help="Append one corrected PO record to Excel")
@@ -528,6 +542,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = extract_pdf(args.extract)
         elif args.process:
             payload = process_pdf(args.process[0], args.process[1], args.process[2])
+        elif args.save_processed_pdf:
+            payload = save_processed_pdf(args.save_processed_pdf[0], args.save_processed_pdf[1], args.save_processed_pdf[2], args.save_processed_pdf[3])
         elif args.ensure_excel:
             path = ensure_excel_file(args.ensure_excel)
             payload = {"ok": True, "excel_path": str(path)}

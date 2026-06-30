@@ -48,6 +48,14 @@ type MoveSourcesResponse = {
   moved: Array<{ ok: boolean; source: string; archived_path?: string; error?: string }>;
 };
 
+type SaveProcessedPdfResponse = {
+  ok: boolean;
+  source: string;
+  processed_pdf_path: string;
+  processed_pdf_filename: string;
+  error?: string;
+};
+
 type CorrectedRecord = {
   tanggal_diproses: string;
   company_name: string;
@@ -138,7 +146,7 @@ export function PoPdfManager({ settings, addHistory }: Props) {
       keterangan: "",
       status: "",
       source_pdf: result.source,
-      processed_pdf: result.processed_pdf_path,
+      processed_pdf: "",
       _selected_fields: settings.selectedExtractionFields,
     };
   }
@@ -146,14 +154,14 @@ export function PoPdfManager({ settings, addHistory }: Props) {
   function setSinglePreview(result: ProcessResponse) {
     const row = recordFromProcessResult(result);
     setPreviewRows([row]);
-    setProcessedPdfPath(row.processed_pdf || "");
+    setProcessedPdfPath("");
     return row;
   }
 
   function appendPreview(result: ProcessResponse) {
     const row = recordFromProcessResult(result);
     setPreviewRows((current) => [...current, row]);
-    setProcessedPdfPath((current) => current || row.processed_pdf || "");
+    setProcessedPdfPath((current) => current);
     return row;
   }
 
@@ -216,11 +224,10 @@ export function PoPdfManager({ settings, addHistory }: Props) {
         return;
       }
       const row = setSinglePreview(result);
-      log(`First page saved: ${result.processed_pdf_filename || fileName(result.processed_pdf_path || "")}`);
-      log(`Saved to: ${result.processed_pdf_path || "-"}`);
       log(`Preview row ready: ${row.nama_vendor || "Vendor kosong"} / ${row.nomor_op || "No OP kosong"}`);
+      log("First-page PDF will be saved after preview correction during Apply.");
       setMessage("Preview ready. Review the row, then Apply Preview to Excel.");
-      addHistory("PDF processed", `${selectedPath} -> ${result.processed_pdf_path || "processed output"}`);
+      addHistory("PDF preview ready", `${selectedPath}: waiting for Apply to save processed PDF`);
     } catch (error) {
       setMessage(`Process bridge failed: ${String(error)}`);
       log(`Process bridge failed: ${String(error)}`);
@@ -272,9 +279,8 @@ export function PoPdfManager({ settings, addHistory }: Props) {
             }
             success += 1;
             const row = appendPreview(result);
-            log(`Worker ${workerNumber}: first page saved: ${result.processed_pdf_filename || fileName(result.processed_pdf_path || "")}`);
-            log(`Worker ${workerNumber}: saved to: ${result.processed_pdf_path || "-"}`);
             log(`Worker ${workerNumber}: preview row added: ${row.nama_vendor || "Vendor kosong"} / ${row.nomor_op || "No OP kosong"}`);
+            log(`Worker ${workerNumber}: first-page PDF will be saved during Apply after correction.`);
           } catch (error) {
             failed += 1;
             log(`Worker ${workerNumber}: failed ${fileName(pdf)}: ${String(error)}`);
@@ -293,6 +299,29 @@ export function PoPdfManager({ settings, addHistory }: Props) {
     } finally {
       setIsProcessing(false);
     }
+  }
+
+  async function saveProcessedPdfForRow(row: CorrectedRecord) {
+    if (!row.source_pdf) {
+      throw new Error("Preview row has no source PDF path.");
+    }
+    if (!settings.processedOutputFolder) {
+      throw new Error("Processed PDF output folder is not set.");
+    }
+
+    log(`Saving corrected first-page PDF: ${row.nama_vendor || "Vendor kosong"} / ${row.nomor_op || "No OP kosong"}`);
+    const result = await invoke<SaveProcessedPdfResponse>("save_processed_pdf", {
+      path: row.source_pdf,
+      outputFolder: settings.processedOutputFolder,
+      vendorName: row.nama_vendor || "VENDOR",
+      noOp: row.nomor_op || "",
+    });
+    if (!result.ok) {
+      throw new Error(result.error || "Failed to save processed PDF.");
+    }
+    log(`First page saved: ${result.processed_pdf_filename}`);
+    log(`Saved to: ${result.processed_pdf_path}`);
+    return result;
   }
 
   async function moveSourcesAfterApply() {
@@ -344,14 +373,23 @@ export function PoPdfManager({ settings, addHistory }: Props) {
     log(`Applying ${previewRows.length} preview row(s) to Excel: ${settings.excelPath}`);
     try {
       let lastRow = 0;
+      const appliedRows: CorrectedRecord[] = [];
       for (const row of previewRows) {
+        const savedPdf = await saveProcessedPdfForRow(row);
+        const rowForExcel = {
+          ...row,
+          processed_pdf: savedPdf.processed_pdf_path,
+          _selected_fields: settings.selectedExtractionFields,
+        };
         const result = await invoke<{ ok: boolean; excel_path: string; row: number }>("append_excel_record", {
           excelPath: settings.excelPath,
-          recordJson: JSON.stringify({ ...row, _selected_fields: settings.selectedExtractionFields }),
+          recordJson: JSON.stringify(rowForExcel),
         });
+        appliedRows.push(rowForExcel);
         lastRow = result.row;
         log(`Excel updated at row ${result.row}: ${row.nomor_op || row.nama_vendor || "preview row"}`);
       }
+      setPreviewRows(appliedRows);
       await moveSourcesAfterApply();
       setMessage(`Applied ${previewRows.length} row(s) to Excel. Last row: ${lastRow}. Source move completed if archive folder is set.`);
       addHistory("Excel updated", `${settings.excelPath} up to row ${lastRow}`);
@@ -439,7 +477,7 @@ export function PoPdfManager({ settings, addHistory }: Props) {
                 {editableColumns.map((column) => (
                   <td key={column.key}>
                     {column.key === "processed_pdf" ? (
-                      <span>{row.processed_pdf || <span className="empty-cell">-</span>}</span>
+                      <span>{row.processed_pdf || <span className="empty-cell">Will be created on Apply</span>}</span>
                     ) : (
                       <input
                         value={String(row[column.key] || "")}

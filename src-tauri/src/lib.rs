@@ -116,6 +116,22 @@ fn process_pdf_blocking(path: String, output_folder: String, source_archive_fold
     run_sidecar(&["--process", &path, &output_folder, &source_archive_folder])
 }
 
+#[tauri::command]
+async fn save_processed_pdf(path: String, output_folder: String, vendor_name: String, no_op: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || save_processed_pdf_blocking(path, output_folder, vendor_name, no_op)).await.map_err(|error| format!("Save processed PDF task failed: {error}"))?
+}
+
+fn save_processed_pdf_blocking(path: String, output_folder: String, vendor_name: String, no_op: String) -> Result<Value, String> {
+    if path.trim().is_empty() {
+        return Err("No source PDF path selected.".to_string());
+    }
+    if output_folder.trim().is_empty() {
+        return Err("No processed PDF output folder selected.".to_string());
+    }
+
+    run_sidecar(&["--save-processed-pdf", &path, &output_folder, &vendor_name, &no_op])
+}
+
 fn app_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -467,6 +483,7 @@ pub fn run() {
             engine_health,
             extract_pdf,
             process_pdf,
+            save_processed_pdf,
             process_batch,
             list_pdf_files,
             move_sources_to_archive,

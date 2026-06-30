@@ -1,4 +1,4 @@
-﻿"""
+"""
 Core PDF Extraction Engine - Full conversion from prototype.
 
 This contains the complete, battle-tested logic from the original main.py
@@ -21,7 +21,7 @@ from collections import defaultdict
 
 try:
     import pytesseract
-    from PIL import Image, ImageEnhance
+    from PIL import Image, ImageEnhance, ImageFilter
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
@@ -94,6 +94,13 @@ def _clean_vendor_name(value: str) -> str:
     return ' '.join(cleaned.split())
 
 
+def _normalize_vendor_suffix(value: str) -> str:
+    return re.sub(
+        r',\s*(PT|CV|PD|UD)\.?$',
+        lambda match: f", {match.group(1).upper()}.",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
 def _normalize_legal_vendor_name(value: str) -> str:
     cleaned = _clean_vendor_name(value)
     match = re.match(r'^PT\.?\s+(.+)$', cleaned, re.IGNORECASE)
@@ -101,6 +108,137 @@ def _normalize_legal_vendor_name(value: str) -> str:
         return f"{match.group(1).strip().upper()}, PT."
     return cleaned
 
+
+
+SUPPLIER_ANCHOR_PATTERN = re.compile(r'\b(?:ALAMAT\s+SUPP?LIER|SUPP?LIER)\b', re.IGNORECASE)
+SUPPLIER_STOP_PATTERN = re.compile(
+    r'\b(?:INFORMATION|INFORMASI|PO\s*DATE|PO\s*NO|NO\.?\s*OP|ESTIMATE|CONTACT|PHONE|FAX|HANDPHONE|TRANSFER\s*INFO|'
+    r'DELIVERY\s+ADDRESS|ALAMAT\s+KIRIM|BILLING\s+ADDRESS|ALAMAT\s+PENAGIHAN|PLANT|CURRENCY|PAYMENT\s+TERM)\b',
+    re.IGNORECASE,
+)
+ADDRESS_NOISE_PATTERN = re.compile(
+    r'\b(?:JL\.?|JALAN|KEL\.?|KEC\.?|KAB\.?|KOTA|RT/?RW|RAYA|BLOK|LANTAI|OFFICE\s+BUILDING|JAKARTA|PLUIT|PLOEIT|CONTACT|PHONE|FAX|BANK)\b',
+    re.IGNORECASE,
+)
+LEGAL_VENDOR_TOKEN_PATTERN = re.compile(r'\b(?:PT\.?|CV\.?|PD\.?|UD\.?|TOKO|VENDOR)\b', re.IGNORECASE)
+PO_HEADER_PATTERN = re.compile(r'\b(?:PURCHASE\s+ORDER|INFORMATION|INFORMASI)\b', re.IGNORECASE)
+
+
+
+def _is_supplier_anchor(line: str) -> bool:
+    upper = line.upper()
+    if "CONFIRMED" in upper or "CONFIRM" in upper:
+        return False
+    if re.search(r'\bALAMAT\s+SUPP?LIER\b', upper):
+        return True
+    if re.search(r'\bSUPP?LIER\b', upper):
+        return True
+    compact = re.sub(r'[^A-Z]', '', upper)
+    return "SUPE" in compact and ("INFORMATION" in compact or "INFORMASI" in compact)
+
+def _line_after_supplier_anchor(line: str) -> str:
+    match = SUPPLIER_ANCHOR_PATTERN.search(line)
+    if not match:
+        return ""
+    return line[match.end():].strip(" |:;-")
+
+
+def _strip_vendor_noise(value: str) -> str:
+    text = re.split(
+        r'\b(?:PO\s*DATE|PO\s*NO|NO\.?\s*OP|ESTIMATE|CONTACT|PHONE|FAX|HANDPHONE|TRANSFER\s*INFO|PAYMENT\s*TERM)\b',
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    text = re.sub(r'\s*[-–]\s*\d{5,10}\b.*$', '', text).strip()
+    text = _clean_vendor_name(text)
+    legal_match = re.search(r'^(.+?,\s*(?:PT\.?|CV\.?|PD\.?|UD\.?|TOKO))\b', text, re.IGNORECASE)
+    if legal_match:
+        text = legal_match.group(1).strip()
+    return _normalize_vendor_suffix(text.strip(" -:,"))
+
+
+def _has_suspicious_short_vendor_tokens(name: str) -> bool:
+    allowed = {"PT", "CV", "PD", "UD"}
+    tokens = [re.sub(r'[^A-Za-z]', '', token).upper() for token in name.split()]
+    tokens = [token for token in tokens if token]
+    return any(len(token) <= 2 and token not in allowed for token in tokens)
+
+
+def _parse_supplier_vendor_line(line: str) -> tuple[str, str]:
+    if not line.strip() or SUPPLIER_STOP_PATTERN.match(line.strip()):
+        return "", ""
+    if ADDRESS_NOISE_PATTERN.search(line):
+        return "", ""
+
+    code_scope = re.split(
+        r'\b(?:PO\s*DATE|PO\s*NO|NO\.?\s*OP|ESTIMATE|CONTACT|PHONE|FAX|HANDPHONE|TRANSFER\s*INFO|PAYMENT\s*TERM)\b',
+        line,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    code_matches = re.findall(r'\b(0{2,}\d{5,10}|\d{5,10})\b', code_scope)
+    vendor_code = code_matches[-1] if code_matches else ""
+    candidate = code_scope
+    if vendor_code:
+        candidate = code_scope[:code_scope.rfind(vendor_code)]
+    vendor_name = _strip_vendor_noise(candidate)
+    if not vendor_name or len(vendor_name) < 4:
+        return "", ""
+    if _has_suspicious_short_vendor_tokens(vendor_name):
+        return "", ""
+    if not vendor_code and not LEGAL_VENDOR_TOKEN_PATTERN.search(vendor_name):
+        return "", ""
+    if re.fullmatch(r'[\d\s\.\-]+', vendor_name):
+        return "", ""
+    return vendor_name, vendor_code
+
+
+def _extract_supplier_region_vendor(lines: list[str]) -> tuple[str, str]:
+    for line in [line.strip() for line in lines[:8] if line.strip()]:
+        if SUPPLIER_STOP_PATTERN.match(line):
+            break
+        vendor_name, vendor_code = _parse_supplier_vendor_line(line)
+        if vendor_name:
+            return vendor_name, vendor_code
+    return "", ""
+def _extract_supplier_block_vendor(lines: list[str]) -> tuple[str, str]:
+    unique_lines = list(dict.fromkeys([line.strip() for line in lines if line.strip()]))
+    for index, line in enumerate(unique_lines):
+        if not _is_supplier_anchor(line):
+            continue
+
+        candidates = []
+        same_line_tail = _line_after_supplier_anchor(line)
+        if same_line_tail and not re.fullmatch(r'(?:INFORMATION|INFORMASI)', same_line_tail, re.IGNORECASE):
+            candidates.append(same_line_tail)
+
+        for next_line in unique_lines[index + 1:index + 6]:
+            if SUPPLIER_STOP_PATTERN.match(next_line.strip()):
+                break
+            candidates.append(next_line)
+
+        for candidate in candidates:
+            vendor_name, vendor_code = _parse_supplier_vendor_line(candidate)
+            if vendor_name:
+                return vendor_name, vendor_code
+
+    header_index = -1
+    for index, line in enumerate(unique_lines[:25]):
+        if PO_HEADER_PATTERN.search(line):
+            header_index = index
+            if "PURCHASE" in line.upper():
+                continue
+            break
+
+    if header_index >= 0:
+        for candidate in unique_lines[header_index + 1:header_index + 8]:
+            if SUPPLIER_STOP_PATTERN.match(candidate.strip()):
+                break
+            vendor_name, vendor_code = _parse_supplier_vendor_line(candidate)
+            if vendor_name:
+                return vendor_name, vendor_code
+    return "", ""
 
 def get_tesseract_paths() -> dict:
     """Returns possible Tesseract locations (development + installed + bundled)."""
@@ -185,6 +323,34 @@ class POExtractor:
             self.log(f"OCR failed: {str(e)[:150]}", "WARNING")
             return ""
 
+    def _get_supplier_region_text(self, page: fitz.Page) -> str:
+        """OCR only the top-left supplier block when full-page OCR misses the vendor line."""
+        if not OCR_AVAILABLE:
+            return ""
+        if not configure_tesseract():
+            return ""
+
+        try:
+            mat = fitz.Matrix(4, 4)
+            pix = page.get_pixmap(matrix=mat)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            width, height = img.size
+            supplier_crop = img.crop((0, int(height * 0.10), int(width * 0.62), int(height * 0.44)))
+            try:
+                supplier_crop = ImageEnhance.Contrast(supplier_crop).enhance(2.8).convert("L")
+                supplier_crop = supplier_crop.filter(ImageFilter.SHARPEN)
+            except Exception:
+                supplier_crop = supplier_crop.convert("L")
+
+            texts = []
+            for psm in (6, 4, 11):
+                text = pytesseract.image_to_string(supplier_crop, lang="ind+eng", config=f"--psm {psm} --oem 3")
+                if text.strip():
+                    texts.append(text)
+            return "\n".join(texts)
+        except Exception as e:
+            self.log(f"Supplier-region OCR failed: {str(e)[:120]}", "WARNING")
+            return ""
     def extract(self, page: fitz.Page, original_filename: str) -> POExtractionResult:
         """
         Full extraction (complete port of the prototype logic).
@@ -252,76 +418,18 @@ class POExtractor:
 
 
         # VENDOR
-        bad_vendor_kw = ["SINAR TERNAK", "CHAROEN", "DELIVERY", "BILLING", "PHONE", "TELP", "FAX", "CONTACT", "BANK", "ATTENTION", "PIC ", "NPWP", "NITKU", "ORG.", "PLANT", "GROUP PEMBELIAN", "MATA UANG", "ALAMAT", "INFORMASI", "SALES PERSON", "SHIPPING", "PO DATE", "ESTIMATE DATE", "PAYMENT TERM", "CURRENCY", "TOLERANCE", "INCOTERM", "PLUIT", "PLOEIT", "JL.", "JALAN", "OFFICE BUILDING", "LANTAI", "JAKARTA", "KEL.", "KEC.", "RAYA BLOK"]
-        candidates = []
-        supplier_lines = list(dict.fromkeys([l.strip() for l in source_lines + lines if l.strip()]))
-
-        for idx, line in enumerate(supplier_lines):
-            next_line = supplier_lines[idx + 1] if idx + 1 < len(supplier_lines) else ""
-            m = re.search(r'(.+?)\s*[-â€“]\s*\|?\s*PO\s*Date\b', line, re.IGNORECASE)
-            if m:
-                name_part = _clean_vendor_name(m.group(1))
-                if len(name_part) >= 4 and not any(b in name_part.upper() for b in bad_vendor_kw):
-                    candidates.append((name_part, "", 45))
-
-            m = re.search(r'(.+?)\s*[-â€“]\s*(?:No\.?\s*OP|PO\s*Date)\b', line, re.IGNORECASE)
-            if m:
-                name_part = _clean_vendor_name(m.group(1))
-                code_match = re.search(r'\b(0{2,}\d{5,10}|\d{6,10})\b', next_line)
-                code_part = code_match.group(1) if code_match else ""
-                if name_part and code_part:
-                    candidates.append((name_part, code_part, 35))
-
-            m = re.search(r'(ONE\s*TIME\s*VENDOR)\s*[-â€“]\s*(\d{5,10})', line, re.IGNORECASE)
-            if m:
-                candidates.append(("ONE TIME VENDOR", m.group(2), 40))
-
-            m = re.search(r'Transfer\s*info\s*[-—:]?\s*(PT\.?\s+[A-Za-z0-9\.\,\s\(\)\-]+?)(?:\s+Payment|\s+Incoterm|\s+Bank|$)', line, re.IGNORECASE)
-            if m:
-                candidates.append((_normalize_legal_vendor_name(m.group(1)), "", 44))
-
-        for line in supplier_lines:
-            for m in re.finditer(r'([A-Z][A-Za-z0-9\.\,\s\(\)\-]+?)\s*[-â€“]\s*(\d{5,10})(?:\s|$|[^0-9])', line):
-                name_part = m.group(1).strip().strip('-â€“').strip()
-                code_part = m.group(2).strip()
-                name_part = _clean_vendor_name(name_part)
-                nu = name_part.upper()
-                if len(name_part) >= 4 and not any(b in nu for b in bad_vendor_kw) and not name_part.replace(' ', '').replace('-', '').isdigit():
-                    if len(name_part) >= 4:
-                        candidates.append((name_part, code_part, 12))
-
-        if candidates:
-            def vendor_score(candidate):
-                name, code, priority = candidate
-                upper = name.upper()
-                trusted = 8 if any(k in upper for k in ["SOLUSINDO", "TOKO", "PT.", "CV.", "TBK", "VENDOR"]) else 0
-                noisy = -30 if any(k in upper for k in bad_vendor_kw) else 0
-                has_code = 6 if code else 0
-                return priority + trusted + has_code + noisy
-
-            candidates.sort(key=lambda c: (-vendor_score(c), -len(c[0])))
-            best = candidates[0]
-            result.vendor_name = best[0]
-            result.vendor_code = best[1]
-        else:
-            m = re.search(r'(ONE\s*TIME\s*VENDOR)\s*[-â€“]?\s*(\d{5,10})', original_full_text, re.IGNORECASE)
-            if m:
-                result.vendor_name = "ONE TIME VENDOR"
-                result.vendor_code = m.group(2)
-
-        # SONIC rescue
-        if result.vendor_name.startswith("ONE TIME") or len(result.vendor_name) < 6 or "ARMADI" in result.vendor_name.upper():
-            m = re.search(r'(SONIC\s+SOLUSINDO[^-]*?)\s*[-â€“]\s*(\d{5,10})', original_full_text, re.IGNORECASE)
-            if m:
-                result.vendor_name = m.group(1).strip()
-                result.vendor_code = m.group(2)
-
-        # Clean vendor name
-        vn = result.vendor_name
-        if re.search(r'\s*[-â€“]\s*\d{5,10}$', vn):
-            vn = re.sub(r'\s*[-â€“]\s*\d{5,10}$', '', vn).strip()
-        result.vendor_name = ' '.join(vn.split()) if vn else "ONE TIME VENDOR"
-
+        vendor_name, vendor_code = _extract_supplier_block_vendor(source_lines + lines)
+        if not vendor_name:
+            supplier_text = self._get_supplier_region_text(page)
+            if supplier_text.strip():
+                supplier_lines = [l.strip() for l in supplier_text.split("\n") if l.strip()]
+                vendor_name, vendor_code = _extract_supplier_block_vendor(supplier_lines + source_lines + lines)
+                if not vendor_name:
+                    vendor_name, vendor_code = _extract_supplier_region_vendor(supplier_lines)
+                if vendor_name:
+                    self.log("Vendor recovered from supplier-region OCR.")
+        result.vendor_name = vendor_name
+        result.vendor_code = vendor_code
         # MULTI-ITEM PARSING (core of the prototype's power)
         item_rows_raw = []
         seen = set()

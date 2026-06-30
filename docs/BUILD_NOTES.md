@@ -31,3 +31,15 @@
 - 2026-06-10 21:10:10 WIB - Fixed OCR lines where vendor code appears before the No. OP label, such as "ONE TIME VENDOR - 0007000940 No. OP : 1871045323". The extractor now prioritizes the number after No. OP/PO No and the local review build version is bumped to 1.1.5.
 - 2026-06-17 22:00:11 WIB - Fixed vendor extraction for supplier lines where the vendor name appears before "PO Date", preventing labels such as PO Date or Estimate date of arrival from becoming the vendor name. Company name extraction now supports top-of-page PT headers such as PT.PRIMAFOOD INTERNATIONAL and PT. SURYA UNGGAS MANDIRI - JAMBI. Local review build version bumped to 1.1.6.
 - 2026-06-17 22:22:24 WIB - Added vendor rescue for OCR-damaged supplier lines by using Transfer info PT names and normalizing them to suffix legal-name format, e.g. "PT. Laboratorium Solusi Indonesia" becomes "LABORATORIUM SOLUSI INDONESIA, PT.". Local review build version bumped to 1.1.7.
+- 2026-06-30 21:35:27 WIB - Changed vendor extraction to use only the SUPPLIER / ALAMAT SUPPLIER block for vendor name and vendor code. Transfer info, delivery address, billing address, and generic document text are no longer valid vendor sources; if the supplier block cannot produce a valid vendor, the vendor fields remain blank for user review. Local review build version bumped to 1.1.8.
+
+## 2026-07-01 01:37:59 WIB
+- Version bumped to 1.1.9 for local review build.
+- Improved PO vendor extraction to stay scoped to the SUPPLIER / ALAMAT SUPPLIER area while tolerating damaged OCR anchors and missing supplier labels.
+- Added supplier-region OCR recovery for hard scans where full-page OCR misses vendor name/vendor code.
+- Added regression tests for supplier-region vendor parsing.
+## 2026-07-01 03:28:00 WIB
+- Version bumped to 1.1.10 for local review build.
+- Changed PO Manager flow so OCR processing only creates editable preview rows; first-page processed PDFs are now saved during Apply after user correction.
+- Processed PDF filenames now use corrected preview values for vendor name and No. OP, preventing wrong OCR vendor names from becoming final file names.
+- Added backend regression tests for delayed processed PDF save behavior.
